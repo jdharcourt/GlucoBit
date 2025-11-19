@@ -57,7 +57,7 @@ session = None
 web_server = None
 previous_glucose = None
 
-
+FORCE_ALARM_TEST = False
 
 BCLK = board.D5    
 LRCLK = board.D6  
@@ -134,7 +134,10 @@ def init_hardware():
         display_bus, width=280, height=240, rotation=90, colstart=0, rowstart=20
     )
     backlight.duty_cycle = 65535
+    
+    splash = displayio.Group()
     init_touch()
+    
 
 
 
@@ -223,6 +226,10 @@ if alarm.wake_alarm:
 
 
 init_hardware()
+red_overlay = displayio.Bitmap(display.width, display.height, 1)
+red_palette = displayio.Palette(1)
+red_palette[0] = 0xFF0000                  # pure red
+red_tilegrid = displayio.TileGrid(red_overlay, pixel_shader=red_palette)
     
 # Trend arrows location 
 TREND_ARROWS = {
@@ -251,6 +258,7 @@ def connect_to_wifi():
     )
     splash.append(value_label)
     display.root_group = splash
+    
 
     for _ in range(3):
         try:
@@ -333,16 +341,30 @@ def voltage_to_percent(vbat_pin):
     return round(total / 10)
     
 
+def flash_red(times: int = 8, on_time: float = 0.12, off_time: float = 0.12):
+    if display.root_group is None:
+        return
 
+    group = display.root_group
 
+    for _ in range(times):
+        if not alarm_active:          # allow instant cancel if user touches to silence
+            break
+        group.append(red_tilegrid)
+        time.sleep(on_time)
+        group.remove(red_tilegrid)
+        time.sleep(off_time)
 
-def play_alarm():
+def play_alarm(current_glucose):
     global alarm_active, touch
     print("ALARM: Low glucose! Touch to silence.")
     alarm_active = True
     
+    flash_red(times=20)
+        
+    
     try:
-        # Properly deinit the main touch BEFORE creating alarm touch
+        # deinit the main touch BEFORE creating alarm touch
         if touch:
             try:
                 touch.deinit()
@@ -359,7 +381,7 @@ def play_alarm():
             # Now create dedicated alarm silence touch on A3
             touch_silence = None
             try:
-                touch_silence = touchio.TouchIn(board.A3)
+                touch_silence = touchio.TouchIn(board.A2)
                 time.sleep(0.2)
                 touch_silence.threshold = touch_silence.raw_value + 1000
                 
@@ -400,46 +422,47 @@ def play_alarm():
     
     
 def check_alarm(value, mmol):
-    global alarm_active, alarm_suppressed, last_low
-    low_threshold = 4.2 if mmol else 76
-    if value is not None and value < low_threshold and not alarm_active and not alarm_suppressed:
-        if last_low != value:  
-            play_alarm()
-            last_low = value
-    
-    
-# -------- DISPLAY GLUCOSE --------
-def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
-    """
-    Display glucose reading with enhanced visual hierarchy and information density.
-    Layout:
-    - Large centered glucose value with color-coded status
-    - Trend arrow with visual indicator
-    - Time and delta in corners for quick reference
-    - Battery status prominently displayed
-    - Status bar showing data freshness
-    """
-    global last_reading
+    global alarm_active, last_low
 
+    # Force test value if test mode is on
+    if FORCE_ALARM_TEST:
+        value = 2.0
+
+    low_threshold = 3.9 if mmol else 70
+    if value is not None and value < low_threshold and not alarm_active:
+        print("LOW GLUCOSE DETECTED -> TRIGGERING ALARM NOW")
+        play_alarm(value)
+        last_low = value
+    
+    
+# main display
+def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
+    global last_reading
     gc.collect()
     splash = displayio.Group()
-
-    # Check if this is a new reading
+   
+    # Normal new-reading detection
     new_reading = False
     if latest_reading_time != last_reading:
         new_reading = True
         last_reading = latest_reading_time
 
-    if not new_reading:
-        return  # Don't redraw if no new data
+    # FORCE TEST MODE 
+    if FORCE_ALARM_TEST:
+        new_reading = True
+        value = 2.0                   
 
-    # -------- PROCESS GLUCOSE VALUE --------
+    if not new_reading:
+        return
+
+    
+
     if value is not None:
         display_value = round(value, 1) if not MMOL else round(value / 18, 1)
     else:
         display_value = None
 
-    # -------- DETERMINE COLOR AND STATUS --------
+
     if display_value is not None:
         if MMOL:
             if 4.2 <= display_value <= 8:
@@ -451,12 +474,12 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
             elif display_value > 12:
                 color = 0xFF5C00  # Orange - very high
                 status = "VERY HIGH"
-            elif display_value < 4.2:
+            elif display_value < 3.9:
                 color = 0xFF0000  # Red - low
                 status = "LOW"
                 check_alarm(value, MMOL)
         else:
-            # mg/dL ranges
+            # mg/dL 
             if 76 <= display_value <= 144:
                 color = 0x00FF00  # Green - target
                 status = "TARGET"
@@ -474,10 +497,9 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
         color = 0xFF0000
         status = "ERROR"
 
-    # ====== MAIN GLUCOSE VALUE (CENTER - LARGE) ======
     value_text = str(display_value) if display_value is not None else "No Data"
     
-    # Add unit indicator to value
+    # unit indicator
     unit = "mmol/L" if MMOL else "mg/dL"
     value_with_unit = f"{value_text}\n{unit}"
     
@@ -490,7 +512,7 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
     )
     splash.append(value_label)
 
-    # ====== UNIT LABEL (below glucose) ======
+    # unit label
     unit_label = label.Label(
         font_30,
         text=unit,
@@ -500,7 +522,7 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
     )
     splash.append(unit_label)
 
-    # ====== TIME (TOP LEFT) ======
+    # time
     current_time = time.localtime()
     time_text = "{:02}:{:02}".format(current_time.tm_hour, current_time.tm_min)
     time_label = label.Label(
@@ -512,7 +534,7 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
     )
     splash.append(time_label)
 
-    # ====== DELTA (TOP RIGHT) ======
+    # delta
     if value is not None and previous_glucose is not None:
         delta = value - previous_glucose
         if MMOL:
@@ -532,7 +554,7 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
     )
     splash.append(delta_label)
 
-    # ====== TREND ARROW (CENTER, BELOW VALUE) ======
+    # trend 
     try:
         arrow_path = TREND_ARROWS[trend]
         bitmap = displayio.OnDiskBitmap(open(arrow_path, "rb"))
@@ -549,7 +571,7 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
 
 
 
-    # ====== BATTERY STATUS (BOTTOM LEFT) ======
+    # battery
     percent = voltage_to_percent(vbat_pin)
     
     # Color battery indicator based on level
@@ -569,13 +591,14 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
     )
     splash.append(bat_label)
 
-
+    print("Checking for alarm")
+    check_alarm(value, MMOL)
     # Render
     display.root_group = splash
     print(f"Display updated: {display_value} {unit} | Trend: {trend} | Battery: {percent}% | Status: {status}")
 
 
-# dexcom api
+# Dexcom API login
 def dexcom_login(https_session):
     url = f"https://{DEXCOM_SERVER}/ShareWebServices/Services/General/LoginPublisherAccountByName"
     headers = {"Content-Type": "application/json"}
