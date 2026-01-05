@@ -21,25 +21,31 @@ import analogio
 import pwmio
 import busio
 import microcontroller
-
+import adafruit_ntp
+import neopixel
+import array
+import math
+import audiocore
+import adafruit_imageload
+import rtc
 
 
     
-# At the very TOP of your file, after imports
+# Check if woken from sleep
 if alarm.sleep_memory[0] == 1:
     print("Woke from deep sleep (touch)")
     alarm.sleep_memory[0] = 0
     
-    # CRITICAL: Manually reset touch hardware on wake
+    # Reset touch on wake
     try:
         import touchio
-        # Force deinit any lingering touch
+        # Deinit touch
         touchio.TouchIn(board.A2).deinit()
     except:
         pass
     
     gc.collect()
-    time.sleep(0.5)  # Give hardware time to settle
+    time.sleep(0.5)  
 
 
 
@@ -50,6 +56,10 @@ alarm_active = False
 alarm_suppressed = False
 last_low = None
 last_reading = None
+last_triggered_value = None
+
+LOW = 2
+HIGH = 17
 
 last_ssid = None
 
@@ -57,71 +67,134 @@ session = None
 web_server = None
 previous_glucose = None
 
+main_group: displayio.Group | None = None
+time_label: label.Label | None = None
+
 FORCE_ALARM_TEST = False
+LED_TEST = False
+
+
 
 BCLK = board.D5    
 LRCLK = board.D6  
 DIN = board.D4    
 audio = audiobusio.I2SOut(bit_clock=BCLK, word_select=LRCLK, data=DIN)
-vbat_pin = analogio.AnalogIn(board.A3)
 
-touch = None
+
+pixel_pin = board.A3
+num_pixels = 2
+
+COLOR_STOPS = [
+    (3.0,  (255, 50, 0)),    # bright red-orange
+    (4.0,  (255, 180, 0)),   # strong yellow
+    (5.0,  (0, 180, 0)),     # vivid green
+    (7.0,  (0, 100, 255)),   # deep blue
+    (10.0, (120, 0, 255)),   # rich purple
+    (13.0, (80, 0, 120)),    # dark indigo
+    (15.0, (200, 0, 150))    # bold magenta
+]
+
+
+
+
+pixels = neopixel.NeoPixel(pixel_pin, num_pixels, brightness=0.3, auto_write=False)
+
+def lerp(a, b, t):
+    return a + (b-a) * t
+
+def lerp_color(c1, c2, t):
+    return (
+        int(lerp(c1[0], c2[0], t)),
+        int(lerp(c1[1], c2[1], t)),
+        int(lerp(c1[2], c2[2], t)),
+        
+    )
+
+def glucose_to_rgb(glucose):
+    # Clamp 
+    if glucose <= COLOR_STOPS[0][0]:
+        return COLOR_STOPS[0][1]
+    if glucose >= COLOR_STOPS[-1][0]:
+        return COLOR_STOPS[-1][1]
+
+    # Find the two surrounding stops
+    for i in range(len(COLOR_STOPS) - 1):
+        g1, c1 = COLOR_STOPS[i]
+        g2, c2 = COLOR_STOPS[i + 1]
+
+        if g1 <= glucose <= g2:
+            t = (glucose - g1) / (g2 - g1)
+            r = int(lerp(c1[0], c2[0], t))
+            g = int(lerp(c1[1], c2[1], t))
+            b = int(lerp(c1[2], c2[2], t))
+            return (r, g, b)
+
+
+
+
 touch_start_time = None
-
 previous_glucose = None
 
-#Initialise Touch
-def init_touch():
-    global touch
-    
-    # CRITICAL: Force release of A0 hardware
-    max_cleanup_attempts = 5
-    for cleanup_attempt in range(max_cleanup_attempts):
-        try:
-            # Aggressively attempt to deinit any existing touch on A0
-            temp = touchio.TouchIn(board.A2)
-            temp.deinit()
-            del temp
-            gc.collect()
-            time.sleep(0.1)
-            print(f"A2 cleanup attempt {cleanup_attempt + 1} succeeded")
-            break
-        except Exception as e:
-            print(f"A2 cleanup attempt {cleanup_attempt + 1}: {e}")
-            gc.collect()
-            time.sleep(0.15)
-    
-    # Now try to create touch with retries
-    touch = None
-    max_retries = 5
-    for attempt in range(max_retries):
+touch = None              
+touch_mode = "sleep"
+
+#initialise touch sensor to detect "Sleep"
+def init_sleep_touch():
+    global touch, touch_mode
+    cleanup_touch()                            
+    for _ in range(8):
         try:
             touch = touchio.TouchIn(board.A2)
-            time.sleep(0.2)  # Increased wait time
-            touch.threshold = touch.raw_value + 1000
-            print(f"Touch initialized on A2 (attempt {attempt + 1})")
+            time.sleep(0.15)
+            touch.threshold = touch.raw_value + 1200
+            touch_mode = "sleep"
+            print("Sleep touch initialized")
             return True
         except Exception as e:
-            print(f"Touch init attempt {attempt + 1} failed: {e}")
-            if touch:
-                try:
-                    touch.deinit()
-                except:
-                    pass
-                touch = None
-            gc.collect()
-            time.sleep(0.2)  # Increased wait between retries
-    
-    print("WARNING: Failed to initialize touch after all retries")
-    touch = None
+            print("Sleep touch init failed:", e)
+            cleanup_touch()
+            time.sleep(0.1)
+    print("Failed to init sleep touch")
     return False
+
+
+#Initialise Touch Sensor when alarm is playing
+def init_alarm_touch():
+    global touch, touch_mode
+    cleanup_touch() 
+    for _ in range(8):
+        try:
+            touch = touchio.TouchIn(board.A2)
+            time.sleep(0.08)
+            touch.threshold = touch.raw_value + 400
+            touch_mode = "alarm"
+            print("ALARM TOUCH INITIALIZED – instant response")
+            return True
+        except Exception as e:
+            print("Alarm touch init failed:", e)
+            cleanup_touch()
+            time.sleep(0.08)
+    print("Failed to init alarm touch")
+    return False
+
+
+
+def cleanup_touch():
+    global touch
+    if touch is not None:
+        try:
+            touch.deinit()
+        except:
+            pass
+        touch = None
+    gc.collect()
 
 
 
 def init_hardware():
     global display, display_bus, touch, backlight
 
-    # Re-init display
+    # Re-initialise display
     displayio.release_displays()
     spi = busio.SPI(clock=board.D8, MOSI=board.D10)
     while not spi.try_lock():
@@ -136,7 +209,7 @@ def init_hardware():
     backlight.duty_cycle = 65535
     
     splash = displayio.Group()
-    init_touch()
+    init_sleep_touch()
     
 
 
@@ -170,7 +243,7 @@ default_settings = {
 
 
         
-# Simple URL decoding function
+# URL decoding 
 def url_decode(text):
     """Simple URL decoder for common percent-encoded characters."""
     result = ""
@@ -189,7 +262,17 @@ def url_decode(text):
             i += 1
     return result.replace('+', ' ')
 
-# Load settings from file if exists
+
+boot_msg = label.Label(
+    font_30,
+    text="Booting...",
+    color=0x00FF00,
+    anchor_point=(0.5, 0.5),
+    anchored_position=(140, 120)
+)
+
+
+# Load settings from file
 settings = default_settings.copy()
 if SETTINGS_FILE in os.listdir():
     try:
@@ -228,14 +311,18 @@ if alarm.wake_alarm:
 init_hardware()
 red_overlay = displayio.Bitmap(display.width, display.height, 1)
 red_palette = displayio.Palette(1)
-red_palette[0] = 0xFF0000                  # pure red
+red_palette[0] = 0xFF0000
 red_tilegrid = displayio.TileGrid(red_overlay, pixel_shader=red_palette)
+
+
+
+
+
     
-# Trend arrows location 
+# Trend arrows file location 
 TREND_ARROWS = {
-    1: "/icons/up.bmp", 2: "/icons/up.bmp", 'Flat': "/icons/level.bin", 
-    4: "/icons/down.bmp", 5: "/icons/down.bmp", 6: "/icons/up-right.bmp", 
-    7: "/icons/down-right.bmp"
+    'DoubleUp': "/icons/up.bmp", 'FortyFiveUp': "/icons/up-right.bmp", 'SingleUp': "/icons/up.bmp", 'Flat': "/icons/level.bmp", 
+    "FortyFiveDown": "/icons/down-right.bmp", 'SingleDown': "/icons/down.bmp", 'DoubleDown': "/icons/down.bmp", 'NonComputable' : "/icons/alert.bmp"
 }
 
 def load_rgb565(path, width, height):
@@ -274,12 +361,16 @@ def connect_to_wifi():
             time.sleep(2)
     return False
 
+    
+
+
+
 def start_ap_mode():
     try:
         ap_ssid = "DexcomConfig"
         ap_password = "config123"
 
-        # start the access point
+        # start AP
         wifi.radio.enabled = True
         wifi.radio.start_ap(ssid=ap_ssid, password=ap_password)
 
@@ -337,7 +428,7 @@ def voltage_to_percent(vbat_pin):
         else:
             perc = int((voltage - 3.0) / (4.2 - 3.0) * 100)
         total += perc
-        time.sleep(0.05)  # Faster sampling
+        time.sleep(0.05)  
     return round(total / 10)
     
 
@@ -348,171 +439,158 @@ def flash_red(times: int = 8, on_time: float = 0.12, off_time: float = 0.12):
     group = display.root_group
 
     for _ in range(times):
-        if not alarm_active:          # allow instant cancel if user touches to silence
+        if not alarm_active:          # cancel if sensor is touched
             break
         group.append(red_tilegrid)
         time.sleep(on_time)
         group.remove(red_tilegrid)
         time.sleep(off_time)
 
+
 def play_alarm(current_glucose):
-    global alarm_active, touch
-    print("ALARM: Low glucose! Touch to silence.")
+    global alarm_active, last_triggered_value
+    if alarm_active:
+        return
+    print("=== LOW GLUCOSE ALARM ===")
     alarm_active = True
-    
-    flash_red(times=20)
-        
-    
+    init_alarm_touch()  
+
+
+    # Generate Sine Wave
+    freq = 880
+    length = 8000 // freq
+    sine_wave = array.array("H", [0] * length)
+    for i in range(length):
+        sine_wave[i] = int((math.sin(2 * math.pi * i / length) + 1) * 32767)
+
+    tone = audiocore.RawSample(sine_wave, sample_rate=8000)
+
     try:
-        # deinit the main touch BEFORE creating alarm touch
-        if touch:
-            try:
-                touch.deinit()
-            except:
-                pass
-        touch = None
-        gc.collect()
-        time.sleep(0.2)
-        
-        with open("/audio/basic.wav", "rb") as f:
-            wave = WaveFile(f)
-            audio.play(wave)
-            
-            # Now create dedicated alarm silence touch on A3
-            touch_silence = None
-            try:
-                touch_silence = touchio.TouchIn(board.A2)
-                time.sleep(0.2)
-                touch_silence.threshold = touch_silence.raw_value + 1000
-                
-                touch_count = 0
-                while audio.playing and touch_count < 3:
-                    if touch_silence.value:
-                        touch_count += 1
-                    else:
-                        touch_count = 0
-                    time.sleep(0.01)
-                
-            except Exception as e:
-                print(f"Alarm touch error: {e}")
-                # Continue audio even if touch fails
-                while audio.playing:
-                    time.sleep(0.1)
-            finally:
-                if touch_silence:
-                    try:
-                        touch_silence.deinit()
-                    except:
-                        pass
-                    touch_silence = None
-            
-            audio.stop()
-            gc.collect()
-            time.sleep(0.2)
-            
+        audio.play(tone, loop=True)
+        flash_count = 0
+        while alarm_active:  
+            if touch and touch.value:
+                print("ALARM SILENCED BY TOUCH")
+                alarm_active = False
+                break
+            # Flash red
+            if display.root_group:
+                display.root_group.append(red_tilegrid)
+            time.sleep(0.15)
+            if display.root_group:
+                display.root_group.remove(red_tilegrid)
+            time.sleep(0.15)
+            flash_count += 1
     except Exception as e:
-        print("Alarm error:", e)
-    
-    alarm_active = False
-    print("Alarm stopped. Back to normal.")
-    
-    # RE-INITIALIZE normal touch
-    time.sleep(0.3)
-    init_touch()
-    
-    
+        print("Alarm playback error:", e)
+    finally: # Stop Alarm + Flashing
+        audio.stop()
+        if display.root_group and red_tilegrid in display.root_group:
+            display.root_group.remove(red_tilegrid)
+        cleanup_touch()
+        init_sleep_touch()
+        alarm_active = False
+
+
 def check_alarm(value, mmol):
-    global alarm_active, last_low
+    global alarm_active, last_triggered_value
 
-    # Force test value if test mode is on
-    if FORCE_ALARM_TEST:
-        value = 2.0
+    if value is None:
+        return
 
+    # Convert value to the display format
+    check_value = value / 18.0 if mmol else value
     low_threshold = 3.9 if mmol else 70
-    if value is not None and value < low_threshold and not alarm_active:
-        print("LOW GLUCOSE DETECTED -> TRIGGERING ALARM NOW")
-        play_alarm(value)
-        last_low = value
+
+    if (check_value < low_threshold and 
+        not alarm_active and 
+        check_value != last_triggered_value):
+        
+        print(f"NEW LOW READING → {check_value} — STARTING PERSISTENT ALARM")
+        last_triggered_value = check_value
+        play_alarm(check_value)
     
     
-# main display
+def rgb_to_hex(rgb_tuple):       #convert RGB value to HEX to display on-screen
+    r, g, b = rgb_tuple
+    return (r << 16) | (g << 8) | b
+
+    
 def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
-    global last_reading
+    global last_reading, last_triggered_value
+    global time_label, main_group  
+
     gc.collect()
-    splash = displayio.Group()
-   
-    # Normal new-reading detection
+
+    # Create persistent group 
+    if main_group is None:
+        main_group = displayio.Group()
+        display.root_group = main_group
+    else:
+        for i in reversed(range(len(main_group))):
+            if main_group[i] is not time_label:
+                main_group.pop(i)
+
+    
     new_reading = False
     if latest_reading_time != last_reading:
         new_reading = True
         last_reading = latest_reading_time
 
-    # FORCE TEST MODE 
     if FORCE_ALARM_TEST:
         new_reading = True
-        value = 2.0                   
-
-    if not new_reading:
-        return
+        value = 2.0
 
     
-
     if value is not None:
         display_value = round(value, 1) if not MMOL else round(value / 18, 1)
     else:
         display_value = None
 
-
     if display_value is not None:
-        if MMOL:
-            if 4.2 <= display_value <= 8:
-                color = 0x00FF00  # Green - target
-                status = "TARGET"
-            elif 8 < display_value <= 12:
-                color = 0xFFFF00  # Yellow - elevated
+        if MMOL:  # mmol/L mode
+            if 3.9 <= display_value <= 10.0:
+                status = "IN RANGE"
+            elif display_value > 10.0:
                 status = "HIGH"
-            elif display_value > 12:
-                color = 0xFF5C00  # Orange - very high
+            elif display_value > 13.0:
                 status = "VERY HIGH"
-            elif display_value < 3.9:
-                color = 0xFF0000  # Red - low
+            else:
                 status = "LOW"
-                check_alarm(value, MMOL)
-        else:
-            # mg/dL 
-            if 76 <= display_value <= 144:
-                color = 0x00FF00  # Green - target
-                status = "TARGET"
-            elif 144 < display_value <= 216:
-                color = 0xFFFF00  # Yellow - elevated
+        else:  # mg/dL mode
+            if 70 <= display_value <= 180:
+                status = "IN RANGE"
+            elif display_value > 180:
                 status = "HIGH"
-            elif display_value > 216:
-                color = 0xFF5C00  # Orange - very high
+            elif display_value > 250:
                 status = "VERY HIGH"
-            elif display_value < 76:
-                color = 0xFF0000  # Red - low
+            else:
                 status = "LOW"
-                check_alarm(value, MMOL)
     else:
-        color = 0xFF0000
-        status = "ERROR"
+        status = "NO DATA"
+
+    value_mmol = value / 18.0 if value is not None else 6.0
+    rgb_value = glucose_to_rgb(value_mmol) if LED_TEST == False else glucose_to_rgb(6.0)
+    display_color = rgb_to_hex(rgb_value)
+
+    pixels[0] = rgb_value
+    pixels[1] = rgb_value
+    pixels.show()
 
     value_text = str(display_value) if display_value is not None else "No Data"
-    
-    # unit indicator
     unit = "mmol/L" if MMOL else "mg/dL"
-    value_with_unit = f"{value_text}\n{unit}"
-    
+
+    # ==================== Main glucose value ====================
     value_label = label.Label(
         font_80,
         text=value_text,
-        color=color,
+        color=display_color,
         anchor_point=(0.5, 0.5),
         anchored_position=(140, 100)
     )
-    splash.append(value_label)
+    main_group.append(value_label)
 
-    # unit label
+    # ==================== Unit ====================
     unit_label = label.Label(
         font_30,
         text=unit,
@@ -520,27 +598,27 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
         anchor_point=(0.5, 0.5),
         anchored_position=(140, 155)
     )
-    splash.append(unit_label)
+    main_group.append(unit_label)
 
-    # time
-    current_time = time.localtime()
-    time_text = "{:02}:{:02}".format(current_time.tm_hour, current_time.tm_min)
-    time_label = label.Label(
-        font_30,
-        text=time_text,
-        color=0xFFFFFF,
-        anchor_point=(0.0, 0.0),
-        anchored_position=(10, 10)
-    )
-    splash.append(time_label)
+    # ==================== Time ====================
+    if time_label is None:
+        time_label = label.Label(
+            font_30,
+            text="88:88",
+            color=0xFFFFFF,
+            anchor_point=(0.0, 0.0),
+            anchored_position=(10, 10)
+        )
+        main_group.append(time_label)
 
-    # delta
+
+    # ==================== Delta ===================
     if value is not None and previous_glucose is not None:
         delta = value - previous_glucose
         if MMOL:
             delta = round(delta / 18, 1)
         delta_text = f"{delta:+.1f}"
-        delta_color = 0x00FF00 if delta <= 0 else 0xFFFF00  # Green if dropping, yellow if rising
+        delta_color = 0x00FF00 if delta <= 0 else 0xFFFF00
     else:
         delta_text = "--"
         delta_color = 0xAAAAAA
@@ -552,50 +630,44 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
         anchor_point=(1.0, 0.0),
         anchored_position=(270, 10)
     )
-    splash.append(delta_label)
+    main_group.append(delta_label)
 
-    # trend 
+    # ==================== Trend arrow ===================
     try:
-        arrow_path = TREND_ARROWS[trend]
-        bitmap = displayio.OnDiskBitmap(open(arrow_path, "rb"))
-        arrow_tile = displayio.TileGrid(
-            bitmap,
-            pixel_shader=displayio.ColorConverter(input_colorspace=displayio.Colorspace.RGB565)
-        )
-        arrow_tile.x = 140 - bitmap.width // 2
-        arrow_tile.y = 175
-        splash.append(arrow_tile)
-
+        arrow_path = TREND_ARROWS.get(trend)
+        if arrow_path:
+            arrow_bitmap, arrow_palette = adafruit_imageload.load(
+                arrow_path,
+                bitmap=displayio.Bitmap,
+                palette=displayio.Palette
+            )
+            arrow_tile = displayio.TileGrid(
+                arrow_bitmap,
+                pixel_shader=arrow_palette
+            )
+            arrow_tile.x = 140 - arrow_bitmap.width // 2
+            arrow_tile.y = 175
+            main_group.append(arrow_tile)
     except Exception as e:
-        print(f"Failed to load arrow: {e}")
+        print(f"Failed to load trend arrow: {e}")
 
-
-
-    # battery
-    percent = voltage_to_percent(vbat_pin)
-    
-    # Color battery indicator based on level
-    if percent >= 50:
-        bat_color = 0x00FF00
-    elif percent >= 20:
-        bat_color = 0xFFFF00
-    else:
-        bat_color = 0xFF0000
-
+    # ============== Battery (placeholder) ===================
     bat_label = label.Label(
         font_30,
-        text=f"🔋 {percent}%",
-        color=bat_color,
+        text="67%",  # Replace with working battery percentage (Currently no usable pins)
+        color=0xFFFFFF,
         anchor_point=(0.0, 1.0),
         anchored_position=(10, 230)
     )
-    splash.append(bat_label)
+    main_group.append(bat_label)
 
-    print("Checking for alarm")
-    check_alarm(value, MMOL)
-    # Render
-    display.root_group = splash
-    print(f"Display updated: {display_value} {unit} | Trend: {trend} | Battery: {percent}% | Status: {status}")
+    print(f"Display updated: {display_value} {unit} | Trend: {trend} | Status: {status}")
+
+    # Check for alarm
+    if new_reading and value is not None:
+        print("Checking for alarm")
+        check_alarm(value, MMOL)
+    
 
 
 # Dexcom API login
@@ -649,9 +721,8 @@ def start_webserver(pool, https_session, ap_mode=False):
         print(f"Failed to initialize server: {e}")
         return None
 
-    # ============================================================
-    # INDEX ROUTE - Serve the redesigned settings page
-    # ============================================================
+
+    # Webpage for settings
     @server.route("/", methods=["GET"])
     def index(request: Request):
         html = f"""
@@ -913,7 +984,7 @@ def start_webserver(pool, https_session, ap_mode=False):
                             </div>
                             <div class="form-group">
                                 <label for="WIFI_PASSWORD">Network Password</label>
-                                <input type="password" id="WIFI_PASSWORD" name="WIFI_PASSWORD" placeholder="Enter your WiFi password" value="{WIFI_PASSWORD}" required>
+                                <input type="password" id="WIFI_PASSWORD" name="WIFI_PASSWORD" placeholder="Enter your WiFi password" value="{WIFI_PASSWORD}">
                             </div>
                         </div>
 
@@ -949,7 +1020,17 @@ def start_webserver(pool, https_session, ap_mode=False):
                                 <span class="toggle-label">Show glucose in mmol/L (instead of mg/dL)</span>
                             </div>
                         </div>
-
+                        
+                        <div class="section">
+                            <div class="section-title">Test Settings</div>
+                            <div class="toggle-group">
+                                <label class="toggle">
+                                    <input type="checkbox" name="ALARM_TEST" {"checked" if FORCE_ALARM_TEST else ""}>
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="toggle-label">Alarm test mode</span>
+                            </div>
+                        </div>
                         <!-- Submit Button -->
                         <div class="button-group">
                             <input type="submit" value="Save Settings">
@@ -967,7 +1048,7 @@ def start_webserver(pool, https_session, ap_mode=False):
     # ============================================================
     @server.route("/save", methods=["POST"])
     def save(request: Request):
-        global settings, session, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, last_fetch_time, last_reading
+        global settings, session, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, last_fetch_time, last_reading, FORCE_ALARM_TEST
 
         form_data = request.form_data
         old_ssid = WIFI_SSID
@@ -982,6 +1063,9 @@ def start_webserver(pool, https_session, ap_mode=False):
             "DISPLAY_NAME": url_decode(form_data.get("DISPLAY_NAME", DISPLAY_NAME)),
             "MMOL": "MMOL" in form_data
         }
+        
+        FORCE_ALARM_TEST = "ALARM_TEST" in form_data
+
 
         # Write to file first
         try:
@@ -1035,7 +1119,7 @@ def start_webserver(pool, https_session, ap_mode=False):
                 start_ap_mode()
                 msg = "✓ Settings saved, but WiFi failed – back in AP mode."
         else:
-            # No WiFi change, just refresh Dexcom session
+            # No WiFi change - refresh Dexcom session
             session = dexcom_login(https_session) or session
             msg = "✓ Settings saved and applied."
 
@@ -1047,7 +1131,7 @@ def start_webserver(pool, https_session, ap_mode=False):
         # Reset last_reading to force display update (bypass new_reading check)
         last_reading = None
         
-        # Try to fetch and display glucose immediately
+        # Try to fetch and display glucose immediaktely
         try:
             print("Attempting immediate glucose fetch...")
             points = get_glucose(https, session)
@@ -1101,57 +1185,38 @@ def start_webserver(pool, https_session, ap_mode=False):
 
 
 def attempt_sleep():
-    """Attempt to enter deep sleep safely."""
+    """Robust deep sleep with touch wake – works on all recent CircuitPython"""
     global touch
-    
-    print("Going to sleep...")
-    
-    # CRITICAL: Deinit touch BEFORE sleep setup
-    if touch:
-        try:
-            touch.deinit()
-        except Exception as e:
-            print(f"Touch deinit before sleep: {e}")
-        touch = None
-    
+
+    print("Preparing for deep sleep...")
+
+    # Deinitisalise touch
+    cleanup_touch()
     gc.collect()
-    time.sleep(0.3)  # Give touch hardware time to release
+    time.sleep(0.5)
     
-    # Turn off screen
+    # Turn screen off
     screen_off()
-    
-    # Save wake reason
+
+    # Mark that next boot is from touch wake
     alarm.sleep_memory[0] = 1
-    
+
     try:
         # Create touch alarm
         touch_alarm = alarm.touch.TouchAlarm(pin=board.A2)
-        print("Touch alarm created, entering deep sleep...")
-        time.sleep(0.1)
-        
-        # Enter deep sleep
-        alarm.light_sleep_until_alarms(touch_alarm)
-        
-    except Exception as e:
-        print(f"Sleep setup failed: {e}")
-        print("Falling back to light sleep workaround...")
-        
-        # Fallback: Use a timer instead
-        for _ in range(10):
-            time.sleep(0.5)
-            if touch and touch.value:
-                print("Woken by touch during fallback sleep")
-                break
-        
-        alarm.sleep_memory[0] = 0
-    
-    finally:
-        # Clean up alarm objects
-        gc.collect()
-        time.sleep(0.3)
-        
-        microcontroller.reset()
 
+        print("Entering deep sleep – touch A2 to wake")
+        alarm.light_sleep_until_alarms(touch_alarm)
+
+        print("Woke up!")  
+    except Exception as e:
+        print("Sleep setup error:", e)
+
+    time.sleep(0.3)
+    gc.collect()
+
+    # Force full reset on startup from boot
+    microcontroller.reset()
 
 
 # -------- MAIN LOOP --------
@@ -1163,85 +1228,59 @@ web_server = None  # in case both Wi-Fi and AP fail
 
 
 
+# ====================
+# Wi-Fi / AP handling 
+# ====================
+def ensure_network_and_server():
+    global web_server, session
 
-
-# Try to connect to Wi-Fi
-if not connect_to_wifi():
-    # Wi-Fi failed → enter AP mode
-    if start_ap_mode():
-        time.sleep(0.5)
-        web_server = start_webserver(pool, https, ap_mode=True)
-
-        # AP mode loop: serve config + try reconnect
-        last_bg = 0
-        while True:
-            if web_server:
-                try:
-                    web_server.poll()
-                except Exception as e:
-                    print("Web poll error:", e)
-                    web_server = start_webserver(pool, https, ap_mode=True)
-
-            now = time.monotonic()
-            if now - last_bg > 5:
-                last_bg = now
-                if not wifi.radio.connected and not wifi.radio.ap_active:
-                    try:
-                        print("Background Wi-Fi reconnect...")
-                        if connect_to_wifi():
-                            print("Wi-Fi connected – leaving AP mode")
-                            break
-                    except Exception as e:
-                        print("Background fail:", e)
-                        start_ap_mode()
-            time.sleep(0.2)
-
-        # AFTER BREAK: we are now on Wi-Fi → start client-mode server
+    # Try normal Wi-Fi first
+    if wifi.radio.connected or connect_to_wifi():
+        print("Connected to Wi-Fi:", wifi.radio.ipv4_address)
+        for _ in range(30):
+            ip = wifi.radio.ipv4_address
+            if ip and str(ip) != "0.0.0.0":
+                break
+            time.sleep(0.5)
+        session = dexcom_login(https) or session
         web_server = start_webserver(pool, https, ap_mode=False)
-
     else:
-        # AP also failed → hang (no web server)
-        while True:
-            time.sleep(60)
-else:
-    # Wi-Fi connected on boot → start client-mode server
-    web_server = start_webserver(pool, https, ap_mode=False)
+        # Fall back to AP mode
+        start_ap_mode()
+        web_server = start_webserver(pool, https, ap_mode=True)
+        session = None
 
-# Login to Dexcom
-session = dexcom_login(https)
-if not session:
-    splash = displayio.Group()
-    splash.append(label.Label(font_40, text="Login Failed", color=0xFF0000,
-                              anchor_point=(0.5, 0.5), anchored_position=(140, 120)))
-    display.root_group = splash
+ensure_network_and_server()
 
-# Main glucose loop
+if wifi.radio.connected:
+    try:
+        pool = socketpool.SocketPool(wifi.radio)
+        
+        # NTP Time server setup
+        ntp = adafruit_ntp.NTP(pool, tz_offset=0)  
+        rtc.RTC().datetime = ntp.datetime
+        print("RTC synced to NTP on boot")
+        print(time.localtime()) #Print current time - debug
+    except Exception as e:
+        print("NTP sync failed on boot:", e)
+
+
+print("Starting main glucose loop")
 last_fetch_time = 0
+first_fetch = True
 
-
+# Main while loop
 while True:
     gc.collect()
-    current_time = time.monotonic()
-    
-    # Initialize touch if needed
-    if touch is None:
-        init_touch()
-    
-    if not alarm_active:
-        if touch and touch.value:
-            if touch_start_time is None:
-                touch_start_time = current_time
-                print("Touch Started. Hold for Sleep.")
-            elif current_time - touch_start_time >= 5:
-                # Use safe sleep function
-                attempt_sleep()
-                touch_start_time = None
-                last_fetch_time = 0  # Force immediate update on wake
-        else:
-            touch_start_time = None
-    
-    # Fetch glucose every 10 seconds
-    if current_time - last_fetch_time >= 10:
+   
+    # Create Time 
+    if time_label is not None:
+        t = time.localtime()
+        time_label.text = f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d}"
+
+    # Glucose Fetch
+    if wifi.radio.connected and (time.monotonic() - last_fetch_time >= 90 or first_fetch): # Checks if WiFi is connected and last fetch was >90 secs
+        first_fetch = False
         points = get_glucose(https, session)
         if points and len(points) == 3:
             (value, trend), (prev_value, _), latest_reading_time = points
@@ -1249,14 +1288,24 @@ while True:
         else:
             session = dexcom_login(https) or session
             show_glucose(None, None, None)
-        last_fetch_time = current_time
-    
-    # Keep web server alive
+        last_fetch_time = time.monotonic()
+
+    elif not wifi.radio.connected:
+        pass
+
+    #Debug Webserver
     if web_server:
         try:
             web_server.poll()
         except Exception as e:
-            print(f"Web server error: {e}")
-            web_server = start_webserver(pool, https, ap_mode=wifi.radio.ap_active)
-    
+            print("Web server poll error:", e)
+            
+    if touch and touch.value: # check for touch
+        print("Touch Detected")
+        time.sleep(0.3)
+        attempt_sleep()
+           
     time.sleep(0.1)
+
+
+
