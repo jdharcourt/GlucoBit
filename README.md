@@ -4,24 +4,23 @@ A low-cost IoT system for non-invasive glucose visualization using Dexcom data o
 
 ## Overview
 
-GlucoBit is a CircuitPython-based device that displays real-time glucose readings from Dexcom continuous glucose monitors (CGMs) on a 280×240 color display. The device features intelligent color coding, audio/visual alarms for low glucose levels, battery monitoring, and WiFi configuration—all powered by a microcontroller with minimal power consumption through deep sleep capabilities.
+GlucoBit is a CircuitPython-based device that displays real-time glucose readings from Dexcom continuous glucose monitors (CGMs) on a 280×240 color display. The device features a clear 280x240 LED color display, RGB LED indicators, audio/visual alarms for critical blood sugar events along with battery power and a small form factor for portability.
 
 ## Key Features
 
-- **Real-time Glucose Display**: Fetches and displays current glucose readings directly from Dexcom servers
-- **Intelligent Color Coding**: RGB gradient from red (low) through green (in range) to purple (high) based on glucose values
+- **Real-time Glucose Display**: Fetches and displays current glucose readings from Dexcom servers
+- **RGB Indicators**: RGB LEDs provide a gradient from red (low) through green (in range) to purple (high), changing based on glucose values
 - **Dual Unit Support**: Toggle between mmol/L and mg/dL display modes
 - **Low Glucose Alarms**: Configurable alerts with flashing display and audio notification when glucose drops below safe levels
-- **Trend Arrows**: Visual indicators showing glucose direction (rising, falling, flat)
-- **Web Configuration**: Easy-to-use web interface for WiFi and Dexcom credentials
-- **Battery Monitoring**: Displays remaining battery percentage
-- **Deep Sleep Mode**: Minimizes power consumption with touch wake capability
-- **NeoPixel Indicators**: RGB LED feedback for glucose status
-- **Sound & Alarm**: I2S audio output for alarm notifications
+- **Trend Arrows**: Visual indicators showing glucose direction (rising, falling, etc.)
+- **Web Configuration**: Web interface for device configuration
+- **Battery Power**: Runs fully off battery power, with 3+ Hours of battery life
+- **Deep Sleep Mode**: Minimizes power consumption with deep sleep functionality
+- **Sound & Alarm**: Loud, persistent alarms that require physical user intervention to silence, ensuring alerts are affective and heard
 
 ## Hardware Requirements
 
-GlucoBit runs on **Adafruit ESP32-S3 TFT Feather** or compatible board with:
+GlucoBit runs on **Xiao ESP32 S3/C3** or similar board with:
 - 32-bit ARM processor
 - WiFi connectivity
 - 280×240 pixel color TFT display (ST7789)
@@ -30,15 +29,24 @@ GlucoBit runs on **Adafruit ESP32-S3 TFT Feather** or compatible board with:
 - Touch sensor input
 - Multiple GPIO pins for I2S and SPI communication
 
+**Additional Required Components**:
+- ST7789 controller-based TFT module
+- 2w 8 Ohm Speaker (28mm)
+- MAX98357a Audio Amplifier
+- 3.7v Li-Po Battery of choice (>500mAh)
+
+**Other Components**
+- BMS (Battery Managment System) for 3.7v LiPo (if alternative MCU is used)
+
 **Recommended display**: ST7789 controller-based TFT module
 
-**Optional**: Audio amplifier and speaker for alarm functionality
+**Enclosure**: Fully 3D-printed enclosure - Files available apon request
 
 ## Getting Started
 
 ### 1. Install CircuitPython
 
-Download and flash the latest CircuitPython firmware for your board from [circuitpython.org](https://circuitpython.org)
+Download and flash the latest CircuitPython firmware for your board - Available from [circuitpython.org](https://circuitpython.org)
 
 ### 2. Clone the Repository
 
@@ -50,7 +58,7 @@ cd GlucoBit
 # Copy all files to CIRCUITPY drive
 ```
 
-### 3. Install Dependencies
+### 3. Install Dependencies - Already Done
 
 All required libraries are included in the `lib/` folder:
 - Adafruit ST7789 display driver
@@ -59,8 +67,9 @@ All required libraries are included in the `lib/` folder:
 - NTP client for time synchronization
 - Bitmap font support
 
-### 4. Configure Settings
+### 4. First Power Up + Configuring Settings
 
+Plug device in
 The device will start in **AP (Access Point) mode** on first boot:
 
 1. Connect to the WiFi network: **`DexcomConfig`** (password: `config123`)
@@ -68,14 +77,14 @@ The device will start in **AP (Access Point) mode** on first boot:
 3. Enter your credentials:
    - **WiFi SSID & Password**: Your home network
    - **Dexcom Username & Password**: Your Dexcom account credentials
-   - **Dexcom Server**: Default is `shareous1.dexcom.com` (US) or your region's server
-   - **Display Name**: Label for your device
+   - **Dexcom Server**: Leave as Default (**`shareous1.dexcom.com`**(EU)) if located outside of the US, alternatively, change to **`share1.dexcom.com`** if located with the US
+   - **Display Name**: (`Optional`) Name your device
    - **Unit**: Toggle mmol/L or mg/dL display
 4. Click "Save and Restart"
 
 Settings are saved to `settings.json` on the device.
 
-### 5. Power On
+### 5. Complete Setup
 
 Once configured, the device will:
 1. Connect to your WiFi network
