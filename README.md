@@ -38,7 +38,6 @@ GlucoBit runs on **Xiao ESP32 S3/C3** or similar board with:
 **Other Components**
 - BMS (Battery Managment System) for 3.7v LiPo (if alternative MCU is used)
 
-**Recommended display**: ST7789 controller-based TFT module
 
 **Enclosure**: Fully 3D-printed enclosure - Files available apon request
 
@@ -157,8 +156,8 @@ Edit `settings.json` for advanced configuration:
 
 ## Supported Dexcom Servers
 
-- **US**: `shareous1.dexcom.com`
-- **International**: Check your Dexcom app settings for your region's server
+- **US**: `share1.dexcom.com`
+- **International**: 'shareous1.dexcom.com'
 
 ## Troubleshooting
 
@@ -191,29 +190,13 @@ ls /dev/tty.* | grep -i usb
 # Or use the CircuitPython Serial Monitor in VS Code
 ```
 
-## Contributing
-
-Contributions are welcome! To get started:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Test thoroughly on the device
-5. Submit a pull request
-
-### Development Tips
+### Development
 
 - **Code Structure**: `code.py` contains the main application logic
 - **Boot Process**: `boot.py` initializes hardware and storage
-- **Testing**: Use `FORCE_ALARM_TEST = True` in `code.py` to test alarms without low glucose
+- **Testing**: Use `FORCE_ALARM_TEST = True` in `code.py` to test alarms without low glucose or toggle setting on Webpage
 - **Memory**: The device has limited RAM; use `gc.collect()` frequently
 
-## Project Highlights
-
-- **Efficient**: Uses CircuitPython's built-in hardware optimization and deep sleep
-- **Portable**: Compact form factor with battery support
-- **Extensible**: Built on CircuitPython libraries; easy to add features
-- **Open Source**: Community-driven with an MIT License
 
 ## Hardware Pinout Reference
 
@@ -232,9 +215,6 @@ Contributions are welcome! To get started:
 | Touch Sensor | A2 |
 | Battery ADC | A0/A1 |
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Support & Documentation
 
@@ -247,15 +227,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 GlucoBit is not a medical device and should not be used as the sole source for glucose monitoring decisions. Always consult your continuous glucose monitor's official app and follow your healthcare provider's recommendations. This project is for educational and personal monitoring purposes only.
 
-## Authors & Contributors
+## Authors 
 
-- **Maintainer**: jdharcourt
-- **Community**: Open to all contributions and improvements
+- **Author**: jdharcourt
+
 
 ## Project Status
 
-GlucoBit is actively maintained and welcomes feature requests and bug reports. Check the [Issues](https://github.com/jdharcourt/GlucoBit/issues) tab for known limitations and planned enhancements.
+GlucoBit is an on-going project that is actively being worked on, with a primary focus on the Stripe YSTE competition currently.
 
 ---
-
-**Questions?** Feel free to open an issue or start a discussion on GitHub.
