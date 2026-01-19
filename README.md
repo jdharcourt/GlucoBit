@@ -39,7 +39,19 @@ GlucoBit runs on **Xiao ESP32 S3/C3** or similar board with:
 - BMS (Battery Managment System) for 3.7v LiPo (if alternative MCU is used)
 
 
-**Enclosure**: Fully 3D-printed enclosure - Files available apon request
+## Enclosure 
+### Fully 3D-printed enclosure 
+- Files available apon request
+
+
+https://github.com/user-attachments/assets/8e845990-12b1-4c61-8b42-e7cab4ce1a71
+
+
+
+<img width="634" height="447" alt="Screenshot 2025-12-27 at 15 15 31" src="https://github.com/user-attachments/assets/ebf19a6d-b33a-4e33-a1de-64fe06652c56" />
+Full Body Enclosure 3d model
+
+
 
 ## Getting Started
 
