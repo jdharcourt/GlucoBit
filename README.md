@@ -44,9 +44,7 @@ GlucoBit runs on **Xiao ESP32 S3/C3** or similar board with:
 - Files available apon request
 
 
-https://github.com/user-attachments/assets/8e845990-12b1-4c61-8b42-e7cab4ce1a71
-
-
+![ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/8defc242-e710-4126-b928-75e76a3ea7c8)
 
 <img width="634" height="447" alt="Screenshot 2025-12-27 at 15 15 31" src="https://github.com/user-attachments/assets/ebf19a6d-b33a-4e33-a1de-64fe06652c56" />
 Full Body Enclosure 3d model
