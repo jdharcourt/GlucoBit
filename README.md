@@ -1,4 +1,5 @@
-
+google-site-verification: google4b9752169576d0fd.html
+[google4b9752169576d0fd (1).html](https://github.com/user-attachments/files/26082884/google4b9752169576d0fd.1.html)
 
 # GlucoBit
 
