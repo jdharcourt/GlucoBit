@@ -1,4 +1,4 @@
-<meta name="google-site-verification" content="p_6S0dKgn8kSfEV0i6_5-P1h00Iay6jfAAnncVRMXEg" />
+
 
 # GlucoBit
 
