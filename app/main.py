@@ -13,12 +13,14 @@ import touchio
 import os
 import gc
 import alarm
+import terminalio
 from adafruit_display_text import label
 import adafruit_st7789
 import fourwire
 import adafruit_requests
 import adafruit_bitmap_font.bitmap_font as bitmap_font
 from adafruit_httpserver import Server, Request, Response, MIMETypes
+from adafruit_display_shapes.roundrect import RoundRect
 from audiocore import WaveFile
 import analogio
 import pwmio
@@ -71,6 +73,9 @@ last_ssid = None
 session = None
 web_server = None
 previous_glucose = None
+pending_wifi_reconnect = False
+pending_session_refresh = False
+pending_display_refresh = False
 
 main_group: displayio.Group | None = None
 time_label: label.Label | None = None
@@ -78,7 +83,8 @@ time_label: label.Label | None = None
 FORCE_ALARM_TEST = False
 LED_TEST = False
 
-version_check = 3600 * 6
+# OTA check interval in seconds; keep this conservative to avoid network churn.
+version_check = 3600
 
 
 
@@ -245,7 +251,9 @@ default_settings = {
     "DEXCOM_PASSWORD": "SVCC123!",
     "DEXCOM_SERVER": "shareous1.dexcom.com",
     "DISPLAY_NAME": "DexcomFollowerName",
-    "MMOL": True
+    "MMOL": True,
+    "UI_THEME": 1,
+    "BACKGROUND_COLOR": "#070B18"
 }
 
 
@@ -302,6 +310,13 @@ DEXCOM_PASSWORD = settings["DEXCOM_PASSWORD"]
 DEXCOM_SERVER = settings["DEXCOM_SERVER"]
 DISPLAY_NAME = settings["DISPLAY_NAME"]
 MMOL = settings["MMOL"]
+BACKGROUND_COLOR = settings.get("BACKGROUND_COLOR", "#070B18")
+try:
+    UI_THEME = int(settings.get("UI_THEME", 1))
+except Exception:
+    UI_THEME = 1
+if UI_THEME not in (1, 2, 3):
+    UI_THEME = 1
 
 
 tft_cs = board.D0
@@ -528,23 +543,254 @@ def rgb_to_hex(rgb_tuple):       #convert RGB value to HEX to display on-screen
     r, g, b = rgb_tuple
     return (r << 16) | (g << 8) | b
 
+
+def add_solid_rect(group, x, y, width, height, color):
+    """Draw a filled rectangle with displayio."""
+    bitmap = displayio.Bitmap(width, height, 1)
+    palette = displayio.Palette(1)
+    palette[0] = color
+    group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=x, y=y))
+
+def draw_trend_arrow(group, trend, center_x, center_y):
+    try:
+        arrow_path = TREND_ARROWS.get(trend)
+        if arrow_path:
+            arrow_bitmap, arrow_palette = adafruit_imageload.load(
+                arrow_path,
+                bitmap=displayio.Bitmap,
+                palette=displayio.Palette
+            )
+            arrow_tile = displayio.TileGrid(arrow_bitmap, pixel_shader=arrow_palette)
+            arrow_tile.x = center_x - arrow_bitmap.width // 2
+            arrow_tile.y = center_y - arrow_bitmap.height // 2
+            group.append(arrow_tile)
+    except Exception as e:
+        print(f"Failed to load trend arrow: {e}")
+        
+def lighten_hex(hex_str, factor=0.3):
+    """
+    Lighten hex color by blending toward white.
+    factor: 0.0 = original, 1.0 = white
+    Returns: string like '#rrggbb'
+    """
+    hex_str = hex_str.lstrip('#')
+    if len(hex_str) == 3:
+        hex_str = ''.join(c * 2 for c in hex_str)
+
+    r = int(hex_str[0:2], 16)
+    g = int(hex_str[2:4], 16)
+    b = int(hex_str[4:6], 16)
+
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def hex_to_color_int(hex_str, default=0x070B18):
+    """Convert #RGB/#RRGGBB (or without #) into 0xRRGGBB int."""
+    if not isinstance(hex_str, str):
+        return default
+    value = hex_str.strip().lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    if len(value) != 6:
+        return default
+    try:
+        return int(value, 16)
+    except Exception:
+        return default
+
+
+def build_glucose_view_model(value, trend, previous_glucose):
+    if value is not None:
+        display_value = round(value / 18, 1) if MMOL else int(round(value))
+    else:
+        display_value = None
+
+    if display_value is not None:
+        if MMOL:
+            if display_value < 3.9:
+                status = "LOW"
+            elif display_value > 13.0:
+                status = "VERY HIGH"
+            elif display_value > 10.0:
+                status = "HIGH"
+            else:
+                status = "IN RANGE"
+        else:
+            if display_value < 70:
+                status = "LOW"
+            elif display_value > 250:
+                status = "VERY HIGH"
+            elif display_value > 180:
+                status = "HIGH"
+            else:
+                status = "IN RANGE"
+    else:
+        status = "NO DATA"
+
+    value_mmol = value / 18.0 if value is not None else 6.0
+    rgb_value = glucose_to_rgb(value_mmol) if not LED_TEST else glucose_to_rgb(6.0)
+    accent_color = rgb_to_hex(rgb_value)
+    bg_color_hex = BACKGROUND_COLOR
+    try:
+        light_bg_hex = lighten_hex(bg_color_hex)
+    except Exception:
+        bg_color_hex = "#070B18"
+        light_bg_hex = lighten_hex(bg_color_hex)
+    bg_color = hex_to_color_int(bg_color_hex, default=0x070B18)
+    light_bg = hex_to_color_int(light_bg_hex, default=0x070B18)
+
+    if value is not None and previous_glucose is not None:
+        delta = value - previous_glucose
+        if MMOL:
+            delta = round(delta / 18, 1)
+            delta_text = f"{delta:+.1f}"
+        else:
+            delta_text = f"{int(round(delta)):+d}"
+        delta_color = 0x4DFF88 if delta < 0 else (0xFFD34D if delta > 0 else 0xB9C9EA)
+    else:
+        delta_text = "--"
+        delta_color = 0x9AA7C2
+
+    status_color = {
+        "LOW": 0xFF4D67,
+        "IN RANGE": 0x4DFF88,
+        "HIGH": 0xFFD34D,
+        "VERY HIGH": 0xFF8C42,
+        "NO DATA": 0x9AA7C2,
+    }.get(status, 0x9AA7C2)
+
+    trend_text = trend if trend else "Unknown"
+    trend_glyph = {
+        "DoubleUp": "UPUP",
+        "SingleUp": "UP",
+        "FortyFiveUp": "UP/",
+        "Flat": "FLAT",
+        "FortyFiveDown": "DN/",
+        "SingleDown": "DN",
+        "DoubleDown": "DNDN",
+        "NonComputable": "ALERT",
+    }.get(trend, "UNK")
+
+    name_text = DISPLAY_NAME.strip() if DISPLAY_NAME else "Dexcom"
+    if len(name_text) > 18:
+        name_text = name_text[:17] + "."
+
+    return {
+        "display_value": display_value,
+        "value_text": str(display_value) if display_value is not None else "--",
+        "unit": "mmol/L" if MMOL else "mg/dL",
+        "status": status,
+        "status_color": status_color,
+        "delta_text": delta_text,
+        "delta_color": delta_color,
+        "trend_text": trend_text[:14],
+        "trend_glyph": trend_glyph,
+        "trend_key": trend,
+        "name_text": name_text,
+        "rgb_value": rgb_value,
+        "accent_color": accent_color,
+        "bg_color_hex": bg_color_hex,
+        "bg_color": bg_color,
+        "light_bg": light_bg,
+    }
+def draw_border(group, x , y, w, h , radius, color, outline, thick):
+    radius = max(0, min(radius, w // 2, h // 2))
+    rect = RoundRect(x = x, y= y , width = w, height = h, r = radius, fill=color,
+                           outline= outline,
+                           stroke=thick
+                )
+    group.append(rect)
     
+def draw_round_rect(group, x , y, w, h , radius, color):
+    radius = max(0, min(radius, w // 2, h // 2))
+    rect = RoundRect(x = x, y= y , width = w, height = h, r = radius, fill=color
+    )
+    group.append(rect)
+
+
+
+
+    
+
+def render_ui_theme_1(group, model):
+    global time_label
+    draw_round_rect(group, 0, 0, 280, 240, 15, model["light_bg"])
+    add_solid_rect(group, 0, 0, 280, 34, model["bg_color"])
+    draw_round_rect(group, 0, 34, 280, 4, 15, model["accent_color"])
+    draw_round_rect(group, 8, 46, 264, 122, 15, model["bg_color"])
+    draw_round_rect(group, 8, 176, 126, 56, 15, model["bg_color"])
+    draw_round_rect(group, 146, 176, 126, 56, 15, model["bg_color"])
+
+    group.append(label.Label(terminalio.FONT, text=model["name_text"], color=0xDDE7FF, anchor_point=(0.0, 0.0), anchored_position=(10, 9)))
+    time_label = label.Label(terminalio.FONT, text="--:--:--", color=0xEAF1FF, anchor_point=(1.0, 0.0), anchored_position=(270, 9))
+    group.append(time_label)
+
+    group.append(label.Label(terminalio.FONT, text=model["status"], color=model["status_color"], anchor_point=(0.5, 0.0), anchored_position=(140, 56)))
+    group.append(label.Label(font_80, text=model["value_text"], color=model["accent_color"], anchor_point=(0.5, 0.5), anchored_position=(140, 106)))
+    group.append(label.Label(terminalio.FONT, text=model["unit"], color=0xAFC1E8, anchor_point=(0.5, 0.0), anchored_position=(140, 146)))
+    group.append(label.Label(terminalio.FONT, text="TREND", color=0xAFC1E8, anchor_point=(0.0, 0.0), anchored_position=(16, 184)))
+    group.append(label.Label(terminalio.FONT, text=model["trend_text"], color=0xDDE7FF, anchor_point=(0.5, 1.0), anchored_position=(71, 228)))
+    group.append(label.Label(terminalio.FONT, text="DELTA", color=0xAFC1E8, anchor_point=(0.0, 0.0), anchored_position=(154, 184)))
+    group.append(label.Label(font_40, text=model["delta_text"], color=model["delta_color"], anchor_point=(0.5, 0.5), anchored_position=(209, 209)))
+    draw_trend_arrow(group, model["trend_key"], 71, 204)
+
+
+def render_ui_theme_2(group, model):
+    global time_label
+    bg_group = displayio.Group()
+    fg_group = displayio.Group()
+    group.append(bg_group)
+    group.append(fg_group)
+
+    add_solid_rect(bg_group, 0, 0, 280, 240, model["light_bg"])
+    draw_round_rect(bg_group, 0, 0, 280, 50, 15, model["accent_color"])
+    draw_round_rect(bg_group, 15, 60, 250, 120, 15, model["bg_color"])
+    draw_round_rect(bg_group, 0, 190, 280, 60, 15, model["bg_color"])
+    draw_round_rect(bg_group, 138, 190, 4, 50, 15, model["accent_color"])
+
+    fg_group.append(label.Label(terminalio.FONT, text=model["name_text"], color=0x101418, anchor_point=(0.0, 0.0), anchored_position=(10, 14)))
+    time_label = label.Label(terminalio.FONT, text="--:--:--", color=0x101418, anchor_point=(1.0, 0.0), anchored_position=(270, 14))
+    fg_group.append(time_label)
+    fg_group.append(label.Label(terminalio.FONT, text=model["status"], color=0x101418, anchor_point=(0.5, 0.0), anchored_position=(140, 32)))
+
+    fg_group.append(label.Label(font_80, text=model["value_text"], color=model["accent_color"], anchor_point=(0.5, 0.5), anchored_position=(140, 110)))
+    fg_group.append(label.Label(font_30, text=model["unit"], color=0xB9C9EA, anchor_point=(0.5, 0.0), anchored_position=(140, 150)))
+
+    fg_group.append(label.Label(terminalio.FONT, text="TREND", color=0x8FA2C9, anchor_point=(0.0, 0.0), anchored_position=(14, 198)))
+    fg_group.append(label.Label(terminalio.FONT, text=model["trend_glyph"], color=0xDDE7FF, anchor_point=(0.0, 0.0), anchored_position=(14, 216)))
+    draw_trend_arrow(fg_group, model["trend_key"], 106, 216)
+
+    fg_group.append(label.Label(terminalio.FONT, text="DELTA", color=0x8FA2C9, anchor_point=(0.0, 0.0), anchored_position=(154, 198)))
+    fg_group.append(label.Label(font_30, text=model["delta_text"], color=model["delta_color"], anchor_point=(0.0, 0.0), anchored_position=(154, 212)))
+
+
+def render_ui_theme_3(group, model):
+    global time_label
+    draw_border(group, 0, 0, 280, 240, 50, model["bg_color"], model["accent_color"], 8)
+
+    time_label = label.Label(terminalio.FONT, text="--:--:--", color=0xC6CAD4, anchor_point=(0.0, 0.0), anchored_position=(30, 16))
+    group.append(time_label)
+    group.append(label.Label(terminalio.FONT, text=model["name_text"], color=0x9EA4B5, anchor_point=(1.0, 0.0), anchored_position=(2, 16)))
+    group.append(label.Label(terminalio.FONT, text=model["status"], color=model["status_color"], anchor_point=(0.5, 0.0), anchored_position=(140, 44)))
+
+    group.append(label.Label(font_80, text=model["value_text"], color=0xF3F5FA, anchor_point=(0.5, 0.5), anchored_position=(140, 110)))
+    group.append(label.Label(terminalio.FONT, text=model["unit"], color=0xA4AABC, anchor_point=(0.5, 0.0), anchored_position=(140, 148)))
+
+    group.append(label.Label(font_30, text=model["delta_text"], color=model["delta_color"], anchor_point=(0.0, 1.0), anchored_position=(25, 224)))
+    draw_trend_arrow(group, model["trend_key"], 140, 190)
+
+
 def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
-    global last_reading, last_triggered_value
-    global time_label, main_group  
+    global last_reading, main_group
 
     gc.collect()
+    main_group = displayio.Group()
+    display.root_group = main_group
 
-    # Create persistent group 
-    if main_group is None:
-        main_group = displayio.Group()
-        display.root_group = main_group
-    else:
-        for i in reversed(range(len(main_group))):
-            if main_group[i] is not time_label:
-                main_group.pop(i)
-
-    
     new_reading = False
     if latest_reading_time != last_reading:
         new_reading = True
@@ -554,129 +800,27 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
         new_reading = True
         value = 2.0
 
-    
-    if value is not None:
-        display_value = round(value, 1) if not MMOL else round(value / 18, 1)
-    else:
-        display_value = None
-
-    if display_value is not None:
-        if MMOL:  # mmol/L mode
-            if 3.9 <= display_value <= 10.0:
-                status = "IN RANGE"
-            elif display_value > 10.0:
-                status = "HIGH"
-            elif display_value > 13.0:
-                status = "VERY HIGH"
-            else:
-                status = "LOW"
-        else:  # mg/dL mode
-            if 70 <= display_value <= 180:
-                status = "IN RANGE"
-            elif display_value > 180:
-                status = "HIGH"
-            elif display_value > 250:
-                status = "VERY HIGH"
-            else:
-                status = "LOW"
-    else:
-        status = "NO DATA"
-
-    value_mmol = value / 18.0 if value is not None else 6.0
-    rgb_value = glucose_to_rgb(value_mmol) if LED_TEST == False else glucose_to_rgb(6.0)
-    display_color = rgb_to_hex(rgb_value)
-
-    pixels[0] = rgb_value
-    pixels[1] = rgb_value
+    model = build_glucose_view_model(value, trend, previous_glucose)
+    pixels[0] = model["rgb_value"]
+    pixels[1] = model["rgb_value"]
     pixels.show()
 
-    value_text = str(display_value) if display_value is not None else "No Data"
-    unit = "mmol/L" if MMOL else "mg/dL"
-
-    # ==================== Main glucose value ====================
-    value_label = label.Label(
-        font_80,
-        text=value_text,
-        color=display_color,
-        anchor_point=(0.5, 0.5),
-        anchored_position=(140, 100)
-    )
-    main_group.append(value_label)
-
-    # ==================== Unit ====================
-    unit_label = label.Label(
-        font_30,
-        text=unit,
-        color=0xAAAAAA,
-        anchor_point=(0.5, 0.5),
-        anchored_position=(140, 155)
-    )
-    main_group.append(unit_label)
-
-    # ==================== Time ====================
-    if time_label is None:
-        time_label = label.Label(
-            font_30,
-            text="88:88",
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(10, 10)
-        )
-        main_group.append(time_label)
-
-
-    # ==================== Delta ===================
-    if value is not None and previous_glucose is not None:
-        delta = value - previous_glucose
-        if MMOL:
-            delta = round(delta / 18, 1)
-        delta_text = f"{delta:+.1f}"
-        delta_color = 0x00FF00 if delta <= 0 else 0xFFFF00
-    else:
-        delta_text = "--"
-        delta_color = 0xAAAAAA
-
-    delta_label = label.Label(
-        font_30,
-        text=delta_text,
-        color=delta_color,
-        anchor_point=(1.0, 0.0),
-        anchored_position=(270, 10)
-    )
-    main_group.append(delta_label)
-
-    # ==================== Trend arrow ===================
     try:
-        arrow_path = TREND_ARROWS.get(trend)
-        if arrow_path:
-            arrow_bitmap, arrow_palette = adafruit_imageload.load(
-                arrow_path,
-                bitmap=displayio.Bitmap,
-                palette=displayio.Palette
-            )
-            arrow_tile = displayio.TileGrid(
-                arrow_bitmap,
-                pixel_shader=arrow_palette
-            )
-            arrow_tile.x = 140 - arrow_bitmap.width // 2
-            arrow_tile.y = 175
-            main_group.append(arrow_tile)
-    except Exception as e:
-        print(f"Failed to load trend arrow: {e}")
+        current_theme = int(UI_THEME)
+    except Exception:
+        current_theme = 1
+    if current_theme not in (1, 2, 3):
+        current_theme = 1
 
-    # ============== Battery (placeholder) ===================
-    bat_label = label.Label(
-        font_30,
-        text="67%",  # Replace with working battery percentage (Currently no usable pins)
-        color=0xFFFFFF,
-        anchor_point=(0.0, 1.0),
-        anchored_position=(10, 230)
-    )
-    main_group.append(bat_label)
+    if current_theme == 2:
+        render_ui_theme_2(main_group, model)
+    elif current_theme == 3:
+        render_ui_theme_3(main_group, model)
+    else:
+        render_ui_theme_1(main_group, model)
 
-    print(f"Display updated: {display_value} {unit} | Trend: {trend} | Status: {status}")
+    print(f"Display updated: {model['display_value']} {model['unit']} | Trend: {trend} | Status: {model['status']} | UI: {current_theme}")
 
-    # Check for alarm
     if new_reading and value is not None:
         print("Checking for alarm")
         check_alarm(value, MMOL)
@@ -688,6 +832,7 @@ def dexcom_login(https_session):
     url = f"https://{DEXCOM_SERVER}/ShareWebServices/Services/General/LoginPublisherAccountByName"
     headers = {"Content-Type": "application/json"}
     payload = f'{{"accountName":"{DEXCOM_USERNAME}","password":"{DEXCOM_PASSWORD}","applicationId":"d89443d2-327c-4a6f-89e5-496bbb0317db"}}'
+    r = None
     try:
         r = https_session.post(url, headers=headers, data=payload)
         if r.status_code == 200:
@@ -697,6 +842,9 @@ def dexcom_login(https_session):
     except Exception as e:
         print(f"Login error: {e}")
         return None
+    finally:
+        if r is not None:
+            r.close()
 
 def get_glucose(https_session, session_id):
     global last_ssid
@@ -704,7 +852,7 @@ def get_glucose(https_session, session_id):
     url = (
         f"https://{DEXCOM_SERVER}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionID={session_id}&minutes=1440&maxCount=2")
     headers = {"Content-Type": "application/json"}
-    
+    r = None
     try:
         r = https_session.post(url, headers=headers, data="{}")
         if r.status_code == 200:
@@ -725,6 +873,9 @@ def get_glucose(https_session, session_id):
     except Exception as e:
         print(f"Glucose fetch error: {e} -- Possible Invalid User/Pass")
         return None, None
+    finally:
+        if r is not None:
+            r.close()
 
 def start_webserver(pool, https_session, ap_mode=False):
     """Start web server with redesigned UI"""
@@ -836,7 +987,9 @@ def start_webserver(pool, https_session, ap_mode=False):
                 }}
 
                 input[type="text"],
-                input[type="password"] {{
+                input[type="password"],
+                input[type="color"],
+                select {{
                     width: 100%;
                     padding: 12px 14px;
                     font-size: 15px;
@@ -847,7 +1000,9 @@ def start_webserver(pool, https_session, ap_mode=False):
                 }}
 
                 input[type="text"]:focus,
-                input[type="password"]:focus {{
+                input[type="password"]:focus,
+                input[type="color"]:focus,
+                select:focus {{
                     background: white;
                     border-color: #667eea;
                     outline: none;
@@ -1025,6 +1180,18 @@ def start_webserver(pool, https_session, ap_mode=False):
                                 <label for="DISPLAY_NAME">Display Name</label>
                                 <input type="text" id="DISPLAY_NAME" name="DISPLAY_NAME" placeholder="Enter a name for this display" value="{DISPLAY_NAME}">
                             </div>
+                            <div class="form-group">
+                                <label for="BACKGROUND_COLOR">Background Color (not active yet)</label>
+                                <input type="color" id="BACKGROUND_COLOR" name="BACKGROUND_COLOR" value="{BACKGROUND_COLOR}">
+                            </div>
+                            <div class="form-group">
+                                <label for="UI_THEME">Screen UI Style</label>
+                                <select id="UI_THEME" name="UI_THEME">
+                                    <option value="1" {"selected" if UI_THEME == 1 else ""}>UI 1 - Cards</option>
+                                    <option value="2" {"selected" if UI_THEME == 2 else ""}>UI 2 - Split Bands</option>
+                                    <option value="3" {"selected" if UI_THEME == 3 else ""}>UI 3 - Minimal</option>
+                                </select>
+                            </div>
                             <div class="toggle-group">
                                 <label class="toggle">
                                     <input type="checkbox" name="MMOL" {"checked" if MMOL else ""}>
@@ -1061,10 +1228,18 @@ def start_webserver(pool, https_session, ap_mode=False):
     # ============================================================
     @server.route("/save", methods=["POST"])
     def save(request: Request):
-        global settings, session, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, last_fetch_time, last_reading, FORCE_ALARM_TEST
+        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST
+        global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
 
         form_data = request.form_data
         old_ssid = WIFI_SSID
+        old_password = WIFI_PASSWORD
+        try:
+            theme_value = int(url_decode(form_data.get("UI_THEME", str(UI_THEME))))
+        except Exception:
+            theme_value = 1
+        if theme_value not in (1, 2, 3):
+            theme_value = 1
 
         # Build new settings dict
         new_settings = {
@@ -1074,7 +1249,9 @@ def start_webserver(pool, https_session, ap_mode=False):
             "DEXCOM_PASSWORD": url_decode(form_data.get("DEXCOM_PASSWORD", DEXCOM_PASSWORD)),
             "DEXCOM_SERVER": url_decode(form_data.get("DEXCOM_SERVER", DEXCOM_SERVER)),
             "DISPLAY_NAME": url_decode(form_data.get("DISPLAY_NAME", DISPLAY_NAME)),
-            "MMOL": "MMOL" in form_data
+            "BACKGROUND_COLOR": url_decode(form_data.get("BACKGROUND_COLOR", BACKGROUND_COLOR)),
+            "MMOL": "MMOL" in form_data,
+            "UI_THEME": theme_value
         }
         
         FORCE_ALARM_TEST = "ALARM_TEST" in form_data
@@ -1104,6 +1281,13 @@ def start_webserver(pool, https_session, ap_mode=False):
                         reloaded[k] = url_decode(v)
                 settings.update(reloaded)
                 globals().update(settings)
+                try:
+                    UI_THEME = int(settings.get("UI_THEME", 1))
+                except Exception:
+                    UI_THEME = 1
+                if UI_THEME not in (1, 2, 3):
+                    UI_THEME = 1
+                settings["UI_THEME"] = UI_THEME
             print("Settings reloaded and globals updated.")
         except Exception as e:
             print("Reload failed:", e)
@@ -1115,54 +1299,17 @@ def start_webserver(pool, https_session, ap_mode=False):
 
         # Check if WiFi settings changed
         wifi_changed = (new_settings["WIFI_SSID"] != old_ssid or
-                        new_settings["WIFI_PASSWORD"] != WIFI_PASSWORD)
+                        new_settings["WIFI_PASSWORD"] != old_password)
+
+        # Keep request handling lightweight; apply reconnect/refresh from main loop.
+        pending_wifi_reconnect = wifi_changed
+        pending_session_refresh = True
+        pending_display_refresh = True
 
         if wifi_changed:
-            try:
-                wifi.radio.stop_ap()
-                print("AP stopped")
-                time.sleep(0.5)
-            except Exception as e:
-                print("stop_ap error:", e)
-
-            if connect_to_wifi():
-                session = dexcom_login(https_session) or session
-                msg = "✓ Settings saved! Connected to new WiFi."
-            else:
-                start_ap_mode()
-                msg = "✓ Settings saved, but WiFi failed – back in AP mode."
+            msg = "Settings saved. Applying WiFi changes now."
         else:
-            # No WiFi change - refresh Dexcom session
-            session = dexcom_login(https_session) or session
-            msg = "✓ Settings saved and applied."
-
-        # ============================================================
-        # FORCE IMMEDIATE DISPLAY REFRESH
-        # ============================================================
-        # Reset fetch timer to force immediate glucose fetch on next loop
-        last_fetch_time = 0
-        # Reset last_reading to force display update (bypass new_reading check)
-        last_reading = None
-        
-        # Try to fetch and display glucose immediaktely
-        try:
-            print("Attempting immediate glucose fetch...")
-            points = get_glucose(https, session)
-            print(f"Fetch result: {points}")
-            if points and len(points) == 3:
-                (value, trend), (prev_value, _), latest_reading_time = points
-                print(f"Got glucose: {value}, trend: {trend}")
-                show_glucose(value, trend, latest_reading_time, prev_value)
-                msg += " | Display updated."
-            else:
-                print("No valid glucose data returned")
-                show_glucose(None, None, None)
-                msg += " | Failed to fetch glucose data."
-        except Exception as e:
-            print(f"Immediate refresh error: {e}")
-            import traceback
-            traceback.print_exc()
-            msg += " | Could not update display."
+            msg = "Settings saved and queued for refresh."
 
         return Response(
             request,
@@ -1266,6 +1413,54 @@ def ensure_network_and_server():
 ensure_network_and_server()
 
 
+def apply_pending_settings():
+    global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
+    global web_server, pool, https, session, last_fetch_time, last_reading
+
+    if not (pending_wifi_reconnect or pending_session_refresh or pending_display_refresh):
+        return
+
+    if pending_wifi_reconnect:
+        print("Applying pending WiFi changes...")
+        try:
+            wifi.radio.stop_ap()
+        except Exception:
+            pass
+
+        connected = connect_to_wifi()
+
+        # Recreate network objects after WiFi state changes.
+        pool = socketpool.SocketPool(wifi.radio)
+        https = adafruit_requests.Session(pool, ssl.create_default_context())
+
+        try:
+            if web_server:
+                web_server.stop()
+        except Exception:
+            pass
+
+        if connected:
+            web_server = start_webserver(pool, https, ap_mode=False)
+            print("WiFi reconnect complete; web server restarted in station mode.")
+        else:
+            start_ap_mode()
+            web_server = start_webserver(pool, https, ap_mode=True)
+            print("WiFi reconnect failed; web server restarted in AP mode.")
+
+        session = None
+
+    if pending_session_refresh:
+        session = None
+
+    if pending_display_refresh:
+        last_fetch_time = 0
+        last_reading = None
+
+    pending_wifi_reconnect = False
+    pending_session_refresh = False
+    pending_display_refresh = False
+
+
 
 if wifi.radio.connected:
     try:
@@ -1289,6 +1484,7 @@ first_check = True
 # Main while loop
 while True:
     gc.collect()
+    apply_pending_settings()
    
     # Create Time 
     if time_label is not None:
@@ -1315,8 +1511,10 @@ while True:
         first_check = False
 
         try:
-            if check_and_update(get_version()):
-                break
+            if check_and_update(get_version(), https):
+                print("OTA update applied — rebooting...")
+                import microcontroller
+                microcontroller.reset()
         except Exception as e:
             print("OTA check error:", e)
 
@@ -1336,4 +1534,3 @@ while True:
         attempt_sleep()
            
     time.sleep(0.1)
-
