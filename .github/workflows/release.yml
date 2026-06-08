@@ -1,0 +1,44 @@
+name: OTA Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release.json
+        run: |
+          cat > release.json <<JSON
+          {
+            "version": "${{ steps.version.outputs.version }}",
+            "files": {
+              "app/main.py":     "main.py",
+              "app/version.txt": "version.txt",
+              "ota.py":          "ota.py"
+            }
+          }
+          JSON
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "OTA release $GITHUB_REF_NAME" \
+            release.json \
+            app/main.py \
+            app/version.txt \
+            ota.py

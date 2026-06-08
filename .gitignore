@@ -1,0 +1,12 @@
+settings.json
+settings.toml
+lib/
+boot_out.txt
+sd/
+/_update/
+*.pyc
+.DS_Store
+.Trashes
+.Spotlight-V100
+.fseventsd
+._*
