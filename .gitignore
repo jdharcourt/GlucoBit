@@ -1,6 +1,7 @@
 settings.json
 settings.toml
 lib/
+firmware/lib/
 boot_out.txt
 sd/
 /_update/
@@ -10,3 +11,8 @@ sd/
 .Spotlight-V100
 .fseventsd
 ._*
+
+# KiCad
+*-backups/
+fp-info-cache
+*.lck
