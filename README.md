@@ -21,6 +21,8 @@ A CircuitPython glucose monitoring display that fetches readings from the Dexcom
 - Low / high / very-high alarms with audio and LED
 - Touch-to-silence alarm
 - Web UI for configuration (connect to device IP on port 80)
+- Bluetooth setup and settings via the iOS companion app (see [`ios/`](ios/README.md))
+- BLE reading relay: the iOS app pushes Dexcom readings to the device when its WiFi is down
 - OTA updates via GitHub Releases (checked hourly)
 - Deep sleep between fetches to conserve battery
 
@@ -64,17 +66,21 @@ Navigate to the device's IP address in a browser to update settings without re-f
 ## File Structure
 
 ```
-code.py              Entry point
-app/main.py          All application logic
-boot.py              Remounts filesystem read-write on device
-wifi.py              WiFi connection helpers
-ota.py               OTA update system
-settings.json        Config (not tracked in git)
-audio/basic.wav      Alarm sound
-icons/               Trend arrow bitmaps
-fonts/               Nunito BDF fonts (30pt, 40pt, 80pt)
-lib/                 Adafruit CircuitPython libraries (not tracked in git)
+firmware/code.py         Entry point
+firmware/app/main.py     All application logic
+firmware/app/ble.py      BLE GATT server for the iOS companion app
+firmware/boot.py         Remounts filesystem read-write on device
+firmware/wifi.py         WiFi connection helpers
+firmware/ota.py          OTA update system
+firmware/audio/          Alarm sound
+firmware/icons/          Trend arrow bitmaps
+firmware/fonts/          Nunito BDF fonts (30pt, 40pt, 80pt)
+hardware/                KiCad PCB design (ESP32-S3-WROOM-1)
+ios/                     iOS companion app (SwiftUI) — see ios/README.md
 ```
+
+BLE requires CircuitPython ≥ 9.0 on the device (`_bleio` on ESP32-S3). On
+older builds the firmware logs "BLE unavailable" and runs WiFi-only.
 
 ## Filesystem Note
 

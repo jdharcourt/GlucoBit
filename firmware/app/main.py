@@ -82,6 +82,12 @@ pending_display_refresh = False
 main_group: displayio.Group | None = None
 time_label: label.Label | None = None
 
+# BLE companion-app link (initialised after network setup)
+ble_link = None
+ble_pushed = None  # (value_mgdl, trend_str, epoch_ts, prev_value) from the app
+last_reading_epoch = None  # epoch seconds of the newest displayed reading
+last_reading_monotonic = None  # time.monotonic() when it was displayed
+
 FORCE_ALARM_TEST = False
 LED_TEST = False
 
@@ -335,6 +341,48 @@ def is_setup_needed():
     )
 
 
+def apply_new_settings(updates):
+    """Merge decoded settings into the current config, persist to flash and
+    queue deferred application via the pending flags. Shared by the web
+    /save handler and the BLE settings characteristic.
+
+    Returns (ok, wifi_changed)."""
+    global settings, UI_THEME
+    global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
+
+    old_ssid = settings.get("WIFI_SSID")
+    old_password = settings.get("WIFI_PASSWORD")
+
+    settings.update(updates)
+
+    try:
+        theme_value = int(settings.get("UI_THEME", 1))
+    except Exception:
+        theme_value = 1
+    if theme_value not in (1, 2, 3):
+        theme_value = 1
+    settings["UI_THEME"] = theme_value
+
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings, f)
+            f.flush()
+            os.sync()
+        print("Settings written to flash.")
+    except Exception as e:
+        print("Settings write failed:", e)
+        return False, False
+
+    globals().update(settings)
+
+    wifi_changed = (settings.get("WIFI_SSID") != old_ssid or
+                    settings.get("WIFI_PASSWORD") != old_password)
+    pending_wifi_reconnect = wifi_changed
+    pending_session_refresh = True
+    pending_display_refresh = True
+    return True, wifi_changed
+
+
 tft_cs = board.D0
 tft_dc = board.D1
 tft_rst = board.D7
@@ -408,6 +456,21 @@ def get_version():
         return "0.0.0"
 
 
+def wt_to_epoch(wt):
+    """Dexcom WT timestamp '/Date(1718106000000)/' (ms) -> epoch seconds."""
+    try:
+        start = wt.index("(") + 1
+        digits = ""
+        for ch in wt[start:]:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        return int(digits) // 1000
+    except Exception:
+        return None
+
+
 
 def start_ap_mode():
     try:
@@ -426,7 +489,7 @@ def start_ap_mode():
         splash.append(
             label.Label(
                 terminalio.FONT,
-                text=f"Setup Required\n\n1. Connect to WiFi:\n   {ap_ssid}\n   Pass: {ap_password}\n\n2. Open browser:\n   http://{ip}/",
+                text=f"Setup Required\n\nUse the GlucoBit app\n(via Bluetooth)\n\nOr connect to WiFi:\n   {ap_ssid}\n   Pass: {ap_password}\nthen open http://{ip}/",
                 color=0xFFFF00,
                 anchor_point=(0.5, 0.5),
                 anchored_position=(140, 120),
@@ -497,6 +560,13 @@ def play_alarm(current_glucose):
         return
     print("=== LOW GLUCOSE ALARM ===")
     alarm_active = True
+    # Tell the companion app the alarm is sounding (the blocking loop below
+    # prevents the main loop's throttled status notify from running).
+    if ble_link:
+        try:
+            ble_link.notify_status(force=True)
+        except Exception:
+            pass
     init_alarm_touch()
 
 
@@ -853,7 +923,7 @@ def show_setup_screen(ip):
     group.append(
         label.Label(
             terminalio.FONT,
-            text=f"Configure Device\n\nVisit in browser:\nhttp://{ip}/\n\nCheck your Dexcom\ncredentials.",
+            text=f"Configure Device\n\nUse the GlucoBit app,\nor visit in browser:\nhttp://{ip}/\n\nCheck your Dexcom\ncredentials.",
             color=0xFFAA00,
             anchor_point=(0.5, 0.5),
             anchored_position=(140, 120),
@@ -1452,8 +1522,6 @@ def start_webserver(pool, https_session, ap_mode=False):
         global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
 
         form_data = request.form_data
-        old_ssid = WIFI_SSID
-        old_password = WIFI_PASSWORD
         try:
             theme_value = int(url_decode(form_data.get("UI_THEME", str(UI_THEME))))
         except Exception:
@@ -1477,55 +1545,15 @@ def start_webserver(pool, https_session, ap_mode=False):
         
         FORCE_ALARM_TEST = "ALARM_TEST" in form_data
 
-
-        # Write to file first
-        try:
-            with open(SETTINGS_FILE, "w") as f:
-                json.dump(new_settings, f)
-                f.flush()
-                os.sync()
-            print("Settings written to flash.")
-        except Exception as e:
-            print("Write failed:", e)
+        # Shared with the BLE settings path: persists, updates globals and
+        # queues reconnect/refresh for the main loop.
+        ok, wifi_changed = apply_new_settings(new_settings)
+        if not ok:
             return Response(
                 request,
                 "<script>alert('ERROR: Could not write settings.json'); window.location='/';</script>",
                 content_type="text/html"
             )
-
-        # Reload from file and update globals
-        try:
-            with open(SETTINGS_FILE, "r") as f:
-                reloaded = json.load(f)
-                for k, v in reloaded.items():
-                    if isinstance(v, str):
-                        reloaded[k] = url_decode(v)
-                settings.update(reloaded)
-                globals().update(settings)
-                try:
-                    UI_THEME = int(settings.get("UI_THEME", 1))
-                except Exception:
-                    UI_THEME = 1
-                if UI_THEME not in (1, 2, 3):
-                    UI_THEME = 1
-                settings["UI_THEME"] = UI_THEME
-            print("Settings reloaded and globals updated.")
-        except Exception as e:
-            print("Reload failed:", e)
-            return Response(
-                request,
-                "<script>alert('ERROR: Could not reload settings'); window.location='/';</script>",
-                content_type="text/html"
-            )
-
-        # Check if WiFi settings changed
-        wifi_changed = (new_settings["WIFI_SSID"] != old_ssid or
-                        new_settings["WIFI_PASSWORD"] != old_password)
-
-        # Keep request handling lightweight; apply reconnect/refresh from main loop.
-        pending_wifi_reconnect = wifi_changed
-        pending_session_refresh = True
-        pending_display_refresh = True
 
         if wifi_changed:
             msg = "Settings saved. Applying WiFi changes now."
@@ -1684,6 +1712,64 @@ def ensure_network_and_server():
 ensure_network_and_server()
 
 
+# ====================
+# BLE companion-app link
+# ====================
+def _ble_on_settings(updates):
+    """Settings JSON received from the app — same path as the web /save."""
+    ok, _ = apply_new_settings(updates)
+    return ok
+
+
+def _ble_on_glucose(value, trend, ts, prev_value, prev_ts):
+    """Reading relayed by the app. Queued for the main loop; ignored (but
+    still acked) when we already have an equal or newer reading."""
+    global ble_pushed
+    if last_reading_epoch is not None and ts <= last_reading_epoch:
+        return True
+    ble_pushed = (value, trend, ts, prev_value)
+    return True
+
+
+def _ble_get_status():
+    flags = 0
+    if wifi.radio.connected:
+        flags |= 0x01
+    if is_setup_needed():
+        flags |= 0x02
+    age = None
+    if last_reading_monotonic is not None:
+        age = int(time.monotonic() - last_reading_monotonic)
+    # needs_data: no WiFi, or the displayed reading has gone stale
+    # (>330 s = two missed 90 s fetch cycles plus margin)
+    if not wifi.radio.connected or age is None or age > 330:
+        flags |= 0x04
+    if alarm_active:
+        flags |= 0x08
+
+    try:
+        parts = [int(p) for p in get_version().split(".")]
+    except Exception:
+        parts = []
+    while len(parts) < 3:
+        parts.append(0)
+
+    return flags, None, age, parts
+
+
+if settings.get("BLE_ENABLED", True):
+    try:
+        from app.ble import GlucoBitBLE
+        gc.collect()
+        _mem_before_ble = gc.mem_free()
+        ble_link = GlucoBitBLE(_ble_on_settings, _ble_on_glucose, _ble_get_status)
+        gc.collect()
+        print(f"BLE enabled (cost {_mem_before_ble - gc.mem_free()} bytes, free {gc.mem_free()})")
+    except Exception as e:
+        ble_link = None
+        print("BLE unavailable:", e)
+
+
 def apply_pending_settings():
     global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
     global web_server, pool, https, session, last_fetch_time, last_reading, last_glucose_cache
@@ -1771,8 +1857,14 @@ while True:
         points = get_glucose(https, session)
         if points and len(points) == 3:
             (value, trend), (prev_value, _), latest_reading_time = points
-            last_glucose_cache = (value, trend, latest_reading_time, prev_value)
-            show_glucose(value, trend, latest_reading_time, prev_value)
+            epoch = wt_to_epoch(latest_reading_time)
+            # Never clobber a newer BLE-relayed reading with a stale fetch.
+            if epoch is None or last_reading_epoch is None or epoch >= last_reading_epoch:
+                last_glucose_cache = (value, trend, latest_reading_time, prev_value)
+                show_glucose(value, trend, latest_reading_time, prev_value)
+                if epoch is not None:
+                    last_reading_epoch = epoch
+                last_reading_monotonic = time.monotonic()
         else:
             session = dexcom_login(https) or session
             if is_setup_needed():
@@ -1782,9 +1874,18 @@ while True:
                 show_glucose(None, None, None)
         last_fetch_time = time.monotonic()
 
-    elif not wifi.radio.connected:
-        pass
-    
+    # Reading relayed from the companion app over BLE (typically while WiFi
+    # is down, but also when fetches are failing and the reading went stale)
+    if ble_pushed is not None:
+        value, trend, ts, prev_value = ble_pushed
+        ble_pushed = None
+        if last_reading_epoch is None or ts > last_reading_epoch:
+            print(f"BLE reading received: {value} mg/dL ({trend})")
+            last_glucose_cache = (value, trend, ts, prev_value)
+            show_glucose(value, trend, ts, prev_value)
+            last_reading_epoch = ts
+            last_reading_monotonic = time.monotonic()
+
     if wifi.radio.connected and (time.monotonic() - last_update_check >= version_check or first_check):
         last_update_check = time.monotonic()
         first_check = False
@@ -1806,7 +1907,14 @@ while True:
             web_server.poll()
         except Exception as e:
             print("Web server poll error:", e)
-            
+
+    if ble_link:
+        try:
+            ble_link.poll()
+            ble_link.notify_status()
+        except Exception as e:
+            print("BLE poll error:", e)
+
     if touch and touch.value: # check for touch
         print("Touch Detected")
         time.sleep(0.3)

@@ -39,6 +39,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 cp "$DEVICE/app/main.py"      "$TMP/main.py"
+cp "$DEVICE/app/ble.py"       "$TMP/ble.py"
 cp "$DEVICE/app/version.txt"  "$TMP/version.txt"
 cp "$DEVICE/ota.py"           "$TMP/ota.py"
 
@@ -48,6 +49,7 @@ cat > "$TMP/release.json" <<JSON
   "version": "$NEW_VERSION",
   "files": {
     "app/main.py":      "main.py",
+    "app/ble.py":       "ble.py",
     "app/version.txt":  "version.txt",
     "ota.py":           "ota.py"
   }
@@ -63,6 +65,7 @@ gh release create "v$NEW_VERSION" \
   --notes "OTA release v$NEW_VERSION" \
   "$TMP/release.json" \
   "$TMP/main.py" \
+  "$TMP/ble.py" \
   "$TMP/version.txt" \
   "$TMP/ota.py"
 
