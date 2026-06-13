@@ -293,8 +293,8 @@
 	)
 	(pad "SH1" thru_hole oval
 		(at -4.32 -6.78)
-		(size 1 2.1)
-		(drill oval 0.6 1.7)
+		(size 1.2 2.1)
+		(drill oval 0.82 1.7)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(solder_mask_margin 0.102)
@@ -302,8 +302,8 @@
 	)
 	(pad "SH2" thru_hole oval
 		(at 4.32 -6.78)
-		(size 1 2.1)
-		(drill oval 0.6 1.7)
+		(size 1.2 2.1)
+		(drill oval 0.82 1.7)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(solder_mask_margin 0.102)
@@ -311,8 +311,8 @@
 	)
 	(pad "SH3" thru_hole oval
 		(at -4.32 -2.6)
-		(size 1 1.8)
-		(drill oval 0.6 1.4)
+		(size 1.2 1.8)
+		(drill oval 0.82 1.4)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(solder_mask_margin 0.102)
@@ -320,8 +320,8 @@
 	)
 	(pad "SH4" thru_hole oval
 		(at 4.32 -2.6)
-		(size 1 1.8)
-		(drill oval 0.6 1.4)
+		(size 1.2 1.8)
+		(drill oval 0.82 1.4)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(solder_mask_margin 0.102)
