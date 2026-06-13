@@ -52,6 +52,7 @@
 			)
 		)
 	)
+	(clearance 0.1)
 	(attr smd)
 	(fp_poly
 		(pts
@@ -580,8 +581,8 @@
 	)
 	(pad "V" thru_hole circle
 		(at 0 0)
-		(size 0.508 0.508)
-		(drill 0.254)
+		(size 0.504 0.504)
+		(drill 0.204)
 		(layers "*.Cu" "*.Mask")
 		(remove_unused_layers no)
 		(uuid "31986cf7-1c52-4543-b6c8-60a34d47c7b7")

@@ -49,7 +49,7 @@
 			)
 		)
 	)
-	(attr smd)
+	(attr smd allow_soldermask_bridges)
 	(fp_line
 		(start -4.47 -5.35)
 		(end -4.47 -3.85)
@@ -61,16 +61,6 @@
 		(uuid "2c47e766-ce7d-4332-ae62-3a3451b448e1")
 	)
 	(fp_line
-		(start -4.47 -1.35)
-		(end -4.47 0)
-		(stroke
-			(width 0.127)
-			(type solid)
-		)
-		(layer "F.SilkS")
-		(uuid "9b378d66-fb19-4444-bac6-8d43f2eb42bd")
-	)
-	(fp_line
 		(start 4.47 -5.35)
 		(end 4.47 -3.85)
 		(stroke
@@ -79,16 +69,6 @@
 		)
 		(layer "F.SilkS")
 		(uuid "ec74608d-dc54-4383-98d5-6ae06ad7bae2")
-	)
-	(fp_line
-		(start 4.47 -1.35)
-		(end 4.47 0)
-		(stroke
-			(width 0.127)
-			(type solid)
-		)
-		(layer "F.SilkS")
-		(uuid "dd4e4579-9f47-4786-8255-b321a82f49f2")
 	)
 	(fp_circle
 		(center -3.2 -8.5)
