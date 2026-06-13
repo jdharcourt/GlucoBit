@@ -1,0 +1,21 @@
+(version 1)
+
+(rule "Silkscreen to Through-hole Pad"
+   (constraint silk_clearance (min 0.18mm))
+   (condition "A.Layer == 'F.Silkscreen' && B.Type == 'Pad'")
+)
+
+(rule "Silkscreen to Through-hole Pad Back"
+   (constraint silk_clearance (min 0.18mm))
+   (condition "A.Layer == 'B.Silkscreen' && B.Type == 'Pad'")
+)
+
+(rule "Silkscreen to Via"
+   (constraint silk_clearance (min 0.18mm))
+   (condition "A.Layer == 'F.Silkscreen' && B.Type == 'Via'")
+)
+
+(rule "Silkscreen to Via Back"
+   (constraint silk_clearance (min 0.18mm))
+   (condition "A.Layer == 'B.Silkscreen' && B.Type == 'Via'")
+)
