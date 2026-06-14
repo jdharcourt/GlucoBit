@@ -87,18 +87,22 @@ enum DeviceTheme {
 }
 
 enum AppTheme {
-    static let background = Color(hex: 0x11110F)
-    static let surface = Color(hex: 0x191814)
-    static let inset = Color(hex: 0x222019)
-    static let border = Color(hex: 0x343127)
-    static let text = Color(hex: 0xF4F1E8)
-    static let secondaryText = Color(hex: 0xA8A195)
-    static let mutedText = Color(hex: 0x7D766C)
-    static let accent = Color(hex: 0xC6A15B)
-    static let positive = Color(hex: 0x6FA66A)
-    static let warning = Color(hex: 0xC18B44)
-    static let danger = Color(hex: 0xC75F53)
-    static let radius: CGFloat = 10
+    static let background = Color(hex: 0x0C1615)
+    static let surface = Color(hex: 0x161F1D)
+    static let inset = Color(hex: 0x1A2422)
+    static let border = Color.white.opacity(0.065)
+    static let text = Color(hex: 0xEEF4F3)
+    static let secondaryText = Color(hex: 0x8A9794)
+    static let mutedText = Color(hex: 0x5D6A67)
+    static let accent = Color(hex: 0x7FDED6)
+    static let positive = Color(hex: 0x46B9AF)
+    static let warning = Color(hex: 0xE0972F)
+    static let danger = Color(hex: 0xDD6147)
+    static let gauge = Color(hex: 0xD7F3F0)
+    static let gaugeInk = Color(hex: 0x0A1413)
+    static let lavender = Color(hex: 0xCDA6F0)
+    static let chart = Color(hex: 0x9D80D6)
+    static let radius: CGFloat = 12
 }
 
 extension Color {

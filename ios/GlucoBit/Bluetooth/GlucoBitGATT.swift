@@ -48,21 +48,18 @@ enum GlucoBitGATT {
         }
     }
 
-    /// Glucose Push payload: ver u8, value u16, trend u8, prev_value u16,
-    /// timestamp u32 (epoch s), prev_timestamp u32 — 14 bytes.
     static func encodeGlucosePush(latest: GlucoseReading, previous: GlucoseReading?) -> Data {
-        var data = Data(capacity: 14)
-        data.append(1) // version
+        var data = Data(capacity: 18)
+        data.append(2)
         data.appendLE(UInt16(clamping: latest.valueMgdl))
         data.append(latest.trend.code)
         data.appendLE(UInt16(clamping: previous?.valueMgdl ?? latest.valueMgdl))
         data.appendLE(UInt32(latest.date.timeIntervalSince1970))
         data.appendLE(UInt32((previous ?? latest).date.timeIntervalSince1970))
+        data.appendLE(UInt32(Date().timeIntervalSince1970))
         return data
     }
 
-    /// Device Status payload: flags u8, battery u8, reading_age_s u16,
-    /// fw_major u8, fw_minor u8, fw_patch u8 — 7 bytes.
     struct DeviceStatus: Equatable {
         let wifiConnected: Bool
         let setupMode: Bool

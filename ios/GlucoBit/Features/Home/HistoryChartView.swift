@@ -4,23 +4,22 @@ import Charts
 struct HistoryChartView: View {
     let readings: [GlucoseReading]
     let useMmol: Bool
-    let backgroundColorHex: String
     let alertLowMgdl: Int
     let alertHighMgdl: Int
 
     @State private var window: Window = .threeHours
 
     enum Window: Int, CaseIterable, Identifiable {
+        case hour = 1
         case threeHours = 3
-        case sixHours = 6
-        case day = 24
+        case twelveHours = 12
 
         var id: Int { rawValue }
         var label: String {
             switch self {
+            case .hour: return "1h"
             case .threeHours: return "3h"
-            case .sixHours: return "6h"
-            case .day: return "24h"
+            case .twelveHours: return "12h"
             }
         }
     }
@@ -46,39 +45,27 @@ struct HistoryChartView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("History")
-                    .font(.headline)
-                    .foregroundStyle(AppTheme.text)
-                Spacer()
-                Picker("Window", selection: $window) {
-                    ForEach(Window.allCases) { w in
-                        Text(w.label).tag(w)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-            }
-            .tint(AppTheme.accent)
-
+        VStack(spacing: 18) {
             if visibleReadings.isEmpty {
                 Text("No readings yet")
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.mutedText)
-                    .frame(maxWidth: .infinity, minHeight: 180)
+                    .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 chart
-                    .frame(height: 200)
+                    .frame(height: 220)
             }
+
+            Picker("Window", selection: $window) {
+                ForEach(Window.allCases) { w in
+                    Text(w.label).tag(w)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 260)
+            .tint(AppTheme.accent)
         }
-        .padding(16)
-        .background(AppTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppTheme.radius)
-                .stroke(AppTheme.border, lineWidth: 1)
-        }
+        .padding(.horizontal, 8)
     }
 
     private var chart: some View {
@@ -91,34 +78,59 @@ struct HistoryChartView: View {
             .foregroundStyle(AppTheme.positive.opacity(0.08))
 
             RuleMark(y: .value("Low threshold", rangeLow))
-                .foregroundStyle(AppTheme.danger.opacity(0.45))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(AppTheme.accent.opacity(0.45))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
             RuleMark(y: .value("High threshold", rangeHigh))
-                .foregroundStyle(AppTheme.warning.opacity(0.45))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(AppTheme.accent.opacity(0.45))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
 
             ForEach(visibleReadings) { reading in
-                PointMark(
+                LineMark(
                     x: .value("Time", reading.date),
                     y: .value("Glucose", displayValue(reading))
                 )
-                .foregroundStyle(DeviceTheme.accentColor(mgdl: reading.valueMgdl))
-                .symbolSize(window == .day ? 18 : 34)
+                .foregroundStyle(AppTheme.chart)
+                .lineStyle(StrokeStyle(lineWidth: 3.4, lineCap: .round, lineJoin: .round))
+                .interpolationMethod(.catmullRom)
+                AreaMark(
+                    x: .value("Time", reading.date),
+                    yStart: .value("Baseline", yDomain.lowerBound),
+                    yEnd: .value("Glucose", displayValue(reading))
+                )
+                .foregroundStyle(AppTheme.chart.opacity(0.16))
+                .interpolationMethod(.catmullRom)
+            }
+
+            if let latest = visibleReadings.last {
+                PointMark(
+                    x: .value("Time", latest.date),
+                    y: .value("Glucose", displayValue(latest))
+                )
+                .foregroundStyle(statusColor(latest))
+                .symbolSize(72)
             }
         }
         .chartYScale(domain: yDomain)
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(AppTheme.border)
+                AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
                 AxisValueLabel(format: .dateTime.hour().minute())
                     .foregroundStyle(AppTheme.secondaryText)
             }
         }
         .chartYAxis {
             AxisMarks { _ in
-                AxisGridLine().foregroundStyle(AppTheme.border)
+                AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
                 AxisValueLabel().foregroundStyle(AppTheme.secondaryText)
             }
+        }
+    }
+
+    private func statusColor(_ reading: GlucoseReading) -> Color {
+        switch GlucoseStatus(mgdl: reading.valueMgdl, lowMgdl: alertLowMgdl, highMgdl: alertHighMgdl) {
+        case .low: return AppTheme.danger
+        case .high, .veryHigh: return AppTheme.warning
+        case .inRange, .noData: return AppTheme.positive
         }
     }
 }
@@ -135,7 +147,6 @@ struct HistoryChartView: View {
     return HistoryChartView(
         readings: readings,
         useMmol: true,
-        backgroundColorHex: "#070B18",
         alertLowMgdl: 70,
         alertHighMgdl: 180
     )

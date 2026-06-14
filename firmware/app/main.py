@@ -79,6 +79,8 @@ previous_glucose = None
 pending_wifi_reconnect = False
 pending_session_refresh = False
 pending_display_refresh = False
+ntp_synced = False
+last_ntp_attempt = 0
 
 main_group: displayio.Group | None = None
 time_label: label.Label | None = None
@@ -94,6 +96,8 @@ LED_TEST = False
 
 # OTA check interval in seconds; keep this conservative to avoid network churn.
 version_check = 3600
+ntp_retry_interval = 60
+ntp_refresh_interval = 3600
 glucose_retry_interval = 20
 glucose_error_retry_interval = 60
 glucose_fallback_interval = 90
@@ -477,7 +481,47 @@ def connect_to_wifi():
             time.sleep(2)
     return False
 
-    
+
+def sync_ntp(force=False):
+    global ntp_synced, last_ntp_attempt
+
+    if not wifi.radio.connected:
+        return False
+
+    now = time.monotonic()
+    interval = ntp_refresh_interval if ntp_synced else ntp_retry_interval
+    if not force and now - last_ntp_attempt < interval:
+        return ntp_synced
+
+    last_ntp_attempt = now
+    try:
+        ntp = adafruit_ntp.NTP(pool, server="pool.ntp.org", tz_offset=0)
+        rtc.RTC().datetime = ntp.datetime
+        ntp_synced = True
+        print("RTC synced to NTP")
+        print(time.localtime())
+        return True
+    except Exception as e:
+        print("NTP sync failed:", e)
+        return False
+
+
+def sync_clock_from_epoch(epoch, source):
+    global ntp_synced
+
+    if ntp_synced or epoch is None or epoch < 1700000000:
+        return False
+    try:
+        rtc.RTC().datetime = time.localtime(epoch)
+        ntp_synced = True
+        print(f"RTC synced from {source}")
+        print(time.localtime())
+        return True
+    except Exception as e:
+        print(f"RTC sync from {source} failed:", e)
+        return False
+
+
 def get_version():
     try:
         with open("/app/version.txt") as f:
@@ -1748,6 +1792,7 @@ def ensure_network_and_server():
             if ip and str(ip) != "0.0.0.0":
                 break
             time.sleep(0.5)
+        sync_ntp(force=True)
         session = dexcom_login(https) or session
         web_server = start_webserver(pool, https, ap_mode=False)
     else:
@@ -1768,10 +1813,11 @@ def _ble_on_settings(updates):
     return ok
 
 
-def _ble_on_glucose(value, trend, ts, prev_value, prev_ts):
+def _ble_on_glucose(value, trend, ts, prev_value, prev_ts, current_ts=None):
     """Reading relayed by the app. Queued for the main loop; ignored (but
     still acked) when we already have an equal or newer reading."""
     global ble_pushed
+    sync_clock_from_epoch(current_ts or ts, "BLE")
     if last_reading_epoch is not None and ts <= last_reading_epoch:
         return True
     ble_pushed = (value, trend, ts, prev_value)
@@ -1844,6 +1890,7 @@ def apply_pending_settings():
             pass
 
         if connected:
+            sync_ntp(force=True)
             web_server = start_webserver(pool, https, ap_mode=False)
             print("WiFi reconnect complete; web server restarted in station mode.")
         else:
@@ -1868,20 +1915,6 @@ def apply_pending_settings():
     pending_display_refresh = False
 
 
-
-if wifi.radio.connected:
-    try:
-        pool = socketpool.SocketPool(wifi.radio)
-        
-        # NTP Time server setup
-        ntp = adafruit_ntp.NTP(pool, tz_offset=0)  
-        rtc.RTC().datetime = ntp.datetime
-        print("RTC synced to NTP on boot")
-        print(time.localtime()) #Print current time - debug
-    except Exception as e:
-        print("NTP sync failed on boot:", e)
-
-
 print("Starting main glucose loop")
 last_update_check = 0
 first_fetch = True
@@ -1894,8 +1927,14 @@ while True:
    
     # Create Time 
     if time_label is not None:
-        t = time.localtime()
-        time_label.text = f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d}"
+        if ntp_synced:
+            t = time.localtime()
+            time_label.text = f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d}"
+        else:
+            time_label.text = "--:--:--"
+
+    if wifi.radio.connected:
+        sync_ntp()
 
     # Glucose Fetch
     now = time.monotonic()

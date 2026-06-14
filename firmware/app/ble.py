@@ -261,12 +261,15 @@ class GlucoBitBLE:
         ver, value, trend_code, prev_value, ts, prev_ts = struct.unpack_from(
             "<BHBHII", pkt
         )
-        if ver != 1:
+        if ver not in (1, 2):
             self._ack(_ACK_GLUCOSE, ACK_LENGTH)
             return
+        current_ts = None
+        if ver == 2 and len(pkt) >= 18:
+            current_ts = struct.unpack_from("<I", pkt, 14)[0]
         trend = TREND_BY_CODE.get(trend_code)
         try:
-            ok = self._on_glucose(value, trend, ts, prev_value, prev_ts)
+            ok = self._on_glucose(value, trend, ts, prev_value, prev_ts, current_ts)
         except Exception as e:
             print("BLE glucose apply error:", e)
             ok = False

@@ -9,15 +9,9 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Current reading")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(AppTheme.text)
                 deviceBanner
                 HeroCardView(
                     reading: sync.store.latest,
-                    deltaMgdl: sync.store.deltaMgdl,
-                    displayName: settings.displayName,
-                    backgroundColorHex: settings.backgroundColorHex,
                     useMmol: settings.useMmol,
                     alertLowMgdl: settings.alertLowMgdl,
                     alertHighMgdl: settings.alertHighMgdl
@@ -25,7 +19,6 @@ struct HomeView: View {
                 HistoryChartView(
                     readings: sync.store.readings,
                     useMmol: settings.useMmol,
-                    backgroundColorHex: settings.backgroundColorHex,
                     alertLowMgdl: settings.alertLowMgdl,
                     alertHighMgdl: settings.alertHighMgdl
                 )
