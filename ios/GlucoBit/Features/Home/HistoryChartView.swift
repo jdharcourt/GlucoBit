@@ -5,6 +5,8 @@ struct HistoryChartView: View {
     let readings: [GlucoseReading]
     let useMmol: Bool
     let backgroundColorHex: String
+    let alertLowMgdl: Int
+    let alertHighMgdl: Int
 
     @State private var window: Window = .threeHours
 
@@ -32,8 +34,8 @@ struct HistoryChartView: View {
         useMmol ? r.valueMmol : Double(r.valueMgdl)
     }
 
-    private var rangeLow: Double { useMmol ? 3.9 : 70 }
-    private var rangeHigh: Double { useMmol ? 10.0 : 180 }
+    private var rangeLow: Double { useMmol ? Double(alertLowMgdl) / 18.0 : Double(alertLowMgdl) }
+    private var rangeHigh: Double { useMmol ? Double(alertHighMgdl) / 18.0 : Double(alertHighMgdl) }
 
     private var yDomain: ClosedRange<Double> {
         let values = visibleReadings.map(displayValue(_:))
@@ -130,6 +132,12 @@ struct HistoryChartView: View {
             date: now.addingTimeInterval(Double(-i) * 300)
         )
     }
-    return HistoryChartView(readings: readings, useMmol: true, backgroundColorHex: "#070B18")
+    return HistoryChartView(
+        readings: readings,
+        useMmol: true,
+        backgroundColorHex: "#070B18",
+        alertLowMgdl: 70,
+        alertHighMgdl: 180
+    )
         .padding()
 }

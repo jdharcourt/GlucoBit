@@ -2,9 +2,6 @@ import Foundation
 import Observation
 import WidgetKit
 
-/// Coordinates Dexcom fetches with the local store, notifications, HealthKit
-/// and widget refresh. Single entry point used by the foreground timer, the
-/// BLE relay and the background refresh task.
 @Observable
 @MainActor
 final class GlucoseSyncService {
@@ -44,9 +41,6 @@ final class GlucoseSyncService {
         }
     }
 
-    /// Fetch latest readings and fan out to store, alerts, HealthKit, widget.
-    /// Returns the latest reading (also when the fetch was throttled and the
-    /// cached value is still current).
     @discardableResult
     func sync(force: Bool = false) async -> GlucoseReading? {
         state = .syncing
@@ -58,7 +52,12 @@ final class GlucoseSyncService {
 
             if let latest = store.latest {
                 if settings.notificationsEnabled {
-                    notifications.evaluate(reading: latest, useMmol: settings.useMmol)
+                    notifications.evaluate(
+                        reading: latest,
+                        useMmol: settings.useMmol,
+                        lowMgdl: settings.alertLowMgdl,
+                        highMgdl: settings.alertHighMgdl
+                    )
                 }
                 if settings.healthKitEnabled {
                     await healthKit.export(readings)
@@ -75,7 +74,6 @@ final class GlucoseSyncService {
         }
     }
 
-    /// 90-second foreground polling, matching the device's cadence.
     func startForegroundPolling() {
         stopForegroundPolling()
         Task { await sync() }

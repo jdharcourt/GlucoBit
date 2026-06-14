@@ -7,6 +7,8 @@ struct GlucoseEntry: TimelineEntry {
     let deltaMgdl: Int?
     let useMmol: Bool
     let backgroundColorHex: String
+    let alertLowMgdl: Int
+    let alertHighMgdl: Int
 }
 
 struct GlucoseTimelineProvider: TimelineProvider {
@@ -16,7 +18,9 @@ struct GlucoseTimelineProvider: TimelineProvider {
             reading: GlucoseReading(valueMgdl: 100, trend: .flat, date: .now),
             deltaMgdl: 2,
             useMmol: true,
-            backgroundColorHex: DeviceTheme.defaultBackgroundHex
+            backgroundColorHex: DeviceTheme.defaultBackgroundHex,
+            alertLowMgdl: 70,
+            alertHighMgdl: 180
         )
     }
 
@@ -46,7 +50,9 @@ struct GlucoseTimelineProvider: TimelineProvider {
             reading: latest,
             deltaMgdl: delta,
             useMmol: prefs.useMmol,
-            backgroundColorHex: prefs.backgroundColorHex
+            backgroundColorHex: prefs.backgroundColorHex,
+            alertLowMgdl: prefs.alertLowMgdl,
+            alertHighMgdl: prefs.alertHighMgdl
         )
     }
 }

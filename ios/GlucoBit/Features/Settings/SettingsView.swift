@@ -29,8 +29,8 @@ struct SettingsView: View {
                             }
                         }
                     }
-                LabeledContent("Low alert", value: settings.useMmol ? "3.9 mmol/L" : "70 mg/dL")
-                LabeledContent("High alert", value: settings.useMmol ? "10.0 mmol/L" : "180 mg/dL")
+                LabeledContent("Low alert", value: thresholdText(settings.alertLowMgdl))
+                LabeledContent("High alert", value: thresholdText(settings.alertHighMgdl))
             }
 
             Section {
@@ -52,10 +52,8 @@ struct SettingsView: View {
 
             Section("Device") {
                 deviceStatusRow
-                if settings.deviceConfigured {
-                    NavigationLink("Device display settings") {
-                        DeviceSettingsView(settings: settings, device: device)
-                    }
+                NavigationLink("Device settings") {
+                    DeviceSettingsView(settings: settings, device: device)
                 }
                 Button(settings.deviceConfigured ? "Set up again" : "Set up GlucoBit") {
                     showSetupWizard = true
@@ -105,6 +103,13 @@ struct SettingsView: View {
         case .bluetoothOff:
             LabeledContent("Status", value: "Bluetooth is off")
         }
+    }
+
+    private func thresholdText(_ mgdl: Int) -> String {
+        if settings.useMmol {
+            return String(format: "%.1f mmol/L", Double(mgdl) / 18.0)
+        }
+        return "\(mgdl) mg/dL"
     }
 }
 

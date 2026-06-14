@@ -9,6 +9,8 @@ struct DeviceSettingsView: View {
     @State private var theme: Int
     @State private var backgroundColor: Color
     @State private var useMmol: Bool
+    @State private var alertLowMgdl: Int
+    @State private var alertHighMgdl: Int
     @State private var sending = false
     @State private var error: String?
 
@@ -19,6 +21,8 @@ struct DeviceSettingsView: View {
         _theme = State(initialValue: settings.deviceUITheme)
         _backgroundColor = State(initialValue: DeviceTheme.backgroundColor(hexString: settings.backgroundColorHex))
         _useMmol = State(initialValue: settings.useMmol)
+        _alertLowMgdl = State(initialValue: settings.alertLowMgdl)
+        _alertHighMgdl = State(initialValue: settings.alertHighMgdl)
     }
 
     var body: some View {
@@ -37,9 +41,14 @@ struct DeviceSettingsView: View {
                 }
             }
 
+            Section("Alerts") {
+                Stepper("Low alert: \(thresholdText(alertLowMgdl))", value: $alertLowMgdl, in: 55...120, step: 5)
+                Stepper("High alert: \(thresholdText(alertHighMgdl))", value: $alertHighMgdl, in: 120...300, step: 5)
+            }
+
             if device.connectionState != .connected {
                 Section {
-                    Label("Connect to your GlucoBit over Bluetooth to apply changes.",
+                    Label("Settings will save in the app. Connect over Bluetooth to push them to GlucoBit.",
                           systemImage: "antenna.radiowaves.left.and.right.slash")
                         .foregroundStyle(.orange)
                 }
@@ -62,16 +71,34 @@ struct DeviceSettingsView: View {
                     ProgressView()
                 } else {
                     Button("Apply") { apply() }
-                        .disabled(device.connectionState != .connected)
+                        .disabled(alertLowMgdl >= alertHighMgdl)
                 }
             }
         }
+    }
+
+    private func thresholdText(_ mgdl: Int) -> String {
+        if useMmol {
+            return String(format: "%.1f mmol/L", Double(mgdl) / 18.0)
+        }
+        return "\(mgdl) mg/dL"
     }
 
     private func apply() {
         sending = true
         error = nil
         let bgHex = backgroundColor.settingsHexString
+        settings.displayName = displayName
+        settings.deviceUITheme = theme
+        settings.backgroundColorHex = bgHex
+        settings.useMmol = useMmol
+        settings.alertLowMgdl = alertLowMgdl
+        settings.alertHighMgdl = alertHighMgdl
+        guard device.connectionState == .connected else {
+            sending = false
+            dismiss()
+            return
+        }
         Task {
             do {
                 try await SettingsProvisioner(device: device).send([
@@ -79,11 +106,9 @@ struct DeviceSettingsView: View {
                     .uiTheme: theme,
                     .backgroundColor: bgHex,
                     .mmol: useMmol,
+                    .alertLowMgdl: alertLowMgdl,
+                    .alertHighMgdl: alertHighMgdl,
                 ])
-                settings.displayName = displayName
-                settings.deviceUITheme = theme
-                settings.backgroundColorHex = bgHex
-                settings.useMmol = useMmol
                 sending = false
                 dismiss()
             } catch {

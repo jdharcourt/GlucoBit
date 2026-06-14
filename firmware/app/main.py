@@ -267,7 +267,9 @@ default_settings = {
     "DISPLAY_NAME": "DexcomFollowerName",
     "MMOL": True,
     "UI_THEME": 1,
-    "BACKGROUND_COLOR": "#070B18"
+    "BACKGROUND_COLOR": "#070B18",
+    "ALERT_LOW_MGDL": 70,
+    "ALERT_HIGH_MGDL": 180
 }
 
 
@@ -290,6 +292,24 @@ def url_decode(text):
             result += text[i]
             i += 1
     return result.replace('+', ' ')
+
+
+def normalize_alert_thresholds(config):
+    try:
+        low = int(config.get("ALERT_LOW_MGDL", 70))
+    except Exception:
+        low = 70
+    try:
+        high = int(config.get("ALERT_HIGH_MGDL", 180))
+    except Exception:
+        high = 180
+    low = max(55, min(low, 120))
+    high = max(120, min(high, 300))
+    if low >= high:
+        low = 70
+        high = 180
+    config["ALERT_LOW_MGDL"] = low
+    config["ALERT_HIGH_MGDL"] = high
 
 
 boot_msg = label.Label(
@@ -315,6 +335,7 @@ if SETTINGS_FILE in os.listdir():
         print("Loaded settings from file.")
     except Exception as e:
         print(f"Failed to load settings: {e}")
+normalize_alert_thresholds(settings)
 
 # Extract settings to variables
 WIFI_SSID = settings["WIFI_SSID"]
@@ -325,6 +346,8 @@ DEXCOM_SERVER = settings["DEXCOM_SERVER"]
 DISPLAY_NAME = settings["DISPLAY_NAME"]
 MMOL = settings["MMOL"]
 BACKGROUND_COLOR = settings.get("BACKGROUND_COLOR", "#070B18")
+ALERT_LOW_MGDL = settings["ALERT_LOW_MGDL"]
+ALERT_HIGH_MGDL = settings["ALERT_HIGH_MGDL"]
 try:
     UI_THEME = int(settings.get("UI_THEME", 1))
 except Exception:
@@ -354,6 +377,7 @@ def apply_new_settings(updates):
     old_password = settings.get("WIFI_PASSWORD")
 
     settings.update(updates)
+    normalize_alert_thresholds(settings)
 
     try:
         theme_value = int(settings.get("UI_THEME", 1))
@@ -558,7 +582,7 @@ def play_alarm(current_glucose):
     global alarm_active, last_triggered_value
     if alarm_active:
         return
-    print("=== LOW GLUCOSE ALARM ===")
+    print("=== GLUCOSE ALARM ===")
     alarm_active = True
     # Tell the companion app the alarm is sounding (the blocking loop below
     # prevents the main loop's throttled status notify from running).
@@ -615,16 +639,16 @@ def check_alarm(value, mmol):
     if value is None:
         return
 
-    # Convert value to the display format
-    check_value = value / 18.0 if mmol else value
-    low_threshold = 3.9 if mmol else 70
+    if ALERT_LOW_MGDL <= value <= ALERT_HIGH_MGDL:
+        last_triggered_value = None
+        return
 
-    if (check_value < low_threshold and 
-        not alarm_active and 
-        check_value != last_triggered_value):
-        
-        print(f"NEW LOW READING → {check_value} — STARTING PERSISTENT ALARM")
-        last_triggered_value = check_value
+    alarm_kind = "LOW" if value < ALERT_LOW_MGDL else "HIGH"
+    check_value = round(value / 18.0, 1) if mmol else int(round(value))
+
+    if not alarm_active and alarm_kind != last_triggered_value:
+        print(f"NEW {alarm_kind} READING {check_value} — STARTING PERSISTENT ALARM")
+        last_triggered_value = alarm_kind
         play_alarm(check_value)
     
     
@@ -698,25 +722,16 @@ def build_glucose_view_model(value, trend, previous_glucose):
     else:
         display_value = None
 
-    if display_value is not None:
-        if MMOL:
-            if display_value < 3.9:
-                status = "LOW"
-            elif display_value > 13.0:
-                status = "VERY HIGH"
-            elif display_value > 10.0:
-                status = "HIGH"
-            else:
-                status = "IN RANGE"
+    if value is not None:
+        very_high_mgdl = max(250, ALERT_HIGH_MGDL + 70)
+        if value < ALERT_LOW_MGDL:
+            status = "LOW"
+        elif value > very_high_mgdl:
+            status = "VERY HIGH"
+        elif value > ALERT_HIGH_MGDL:
+            status = "HIGH"
         else:
-            if display_value < 70:
-                status = "LOW"
-            elif display_value > 250:
-                status = "VERY HIGH"
-            elif display_value > 180:
-                status = "HIGH"
-            else:
-                status = "IN RANGE"
+            status = "IN RANGE"
     else:
         status = "NO DATA"
 
@@ -1389,6 +1404,18 @@ def start_webserver(pool, https_session, ap_mode=False):
                                 <span class="toggle-label">Mmol/L</span>
                             </div>
                         </div>
+
+                        <div class="section">
+                            <div class="section-title">Alert Settings</div>
+                            <div class="form-group">
+                                <label for="ALERT_LOW_MGDL">Low Alert (mg/dL)</label>
+                                <input type="number" id="ALERT_LOW_MGDL" name="ALERT_LOW_MGDL" min="55" max="120" step="5" value="{ALERT_LOW_MGDL}">
+                            </div>
+                            <div class="form-group">
+                                <label for="ALERT_HIGH_MGDL">High Alert (mg/dL)</label>
+                                <input type="number" id="ALERT_HIGH_MGDL" name="ALERT_HIGH_MGDL" min="120" max="300" step="5" value="{ALERT_HIGH_MGDL}">
+                            </div>
+                        </div>
                         
                         <div class="section">
                             <div class="section-title">Test Settings</div>
@@ -1518,7 +1545,7 @@ def start_webserver(pool, https_session, ap_mode=False):
     # ============================================================
     @server.route("/save", methods=["POST"])
     def save(request: Request):
-        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST
+        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST, ALERT_LOW_MGDL, ALERT_HIGH_MGDL
         global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
 
         form_data = request.form_data
@@ -1540,6 +1567,8 @@ def start_webserver(pool, https_session, ap_mode=False):
             "BACKGROUND_COLOR": url_decode(form_data.get("BACKGROUND_COLOR", BACKGROUND_COLOR)),
             "MMOL": "MMOL" in form_data,
             "UI_THEME": theme_value,
+            "ALERT_LOW_MGDL": form_data.get("ALERT_LOW_MGDL", ALERT_LOW_MGDL),
+            "ALERT_HIGH_MGDL": form_data.get("ALERT_HIGH_MGDL", ALERT_HIGH_MGDL),
             "SETUP_MODE": False
         }
         
@@ -1919,7 +1948,5 @@ while True:
         print("Touch Detected")
         time.sleep(0.3)
         attempt_sleep()
-           
-    time.sleep(0.1)
 
- 
+    time.sleep(0.1)

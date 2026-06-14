@@ -1,9 +1,6 @@
 import Foundation
 import UserNotifications
 
-/// Local low/high glucose alerts, mirroring the firmware's thresholds
-/// (low < 70 mg/dL / 3.9 mmol; high > 180; very high > 250) and its
-/// one-alert-per-excursion behavior (`last_triggered_value`).
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var lastAlertedStatus: GlucoseStatus?
 
@@ -12,10 +9,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
-    /// Called after each new reading. Fires once per excursion: re-arms only
-    /// when glucose returns to range.
-    func evaluate(reading: GlucoseReading, useMmol: Bool) {
-        let status = GlucoseStatus(mgdl: reading.valueMgdl)
+    func evaluate(reading: GlucoseReading, useMmol: Bool, lowMgdl: Int, highMgdl: Int) {
+        let status = GlucoseStatus(mgdl: reading.valueMgdl, lowMgdl: lowMgdl, highMgdl: highMgdl)
 
         guard status != .inRange else {
             lastAlertedStatus = nil
@@ -33,13 +28,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         switch status {
         case .low:
             content.title = "Low Glucose"
-            content.body = "\(value) \(unit) — below your low threshold."
+            content.body = "\(value) \(unit) is below your low threshold."
         case .high:
             content.title = "High Glucose"
-            content.body = "\(value) \(unit) — above your high threshold."
+            content.body = "\(value) \(unit) is above your high threshold."
         case .veryHigh:
             content.title = "Very High Glucose"
-            content.body = "\(value) \(unit) — well above your high threshold."
+            content.body = "\(value) \(unit) is well above your high threshold."
         case .inRange, .noData:
             return
         }
@@ -52,7 +47,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
-    // Show alerts even when the app is foregrounded.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification

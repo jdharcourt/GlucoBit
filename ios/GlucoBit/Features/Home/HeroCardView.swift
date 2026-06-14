@@ -6,13 +6,15 @@ struct HeroCardView: View {
     let displayName: String
     let backgroundColorHex: String
     let useMmol: Bool
+    let alertLowMgdl: Int
+    let alertHighMgdl: Int
 
     @State private var now = Date()
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var status: GlucoseStatus {
         guard let reading, !reading.isStale else { return .noData }
-        return GlucoseStatus(mgdl: reading.valueMgdl)
+        return GlucoseStatus(mgdl: reading.valueMgdl, lowMgdl: alertLowMgdl, highMgdl: alertHighMgdl)
     }
 
     private var accent: Color {
@@ -100,7 +102,7 @@ struct HeroCardView: View {
     }
 
     private var deltaColor: Color {
-        guard let deltaMgdl else { return AppTheme.mutedText    }
+        guard let deltaMgdl else { return AppTheme.mutedText }
         if deltaMgdl < 0 { return AppTheme.positive }
         if deltaMgdl > 0 { return AppTheme.warning }
         return AppTheme.secondaryText
@@ -132,14 +134,18 @@ struct HeroCardView: View {
             deltaMgdl: -3,
             displayName: "Josh",
             backgroundColorHex: "#070B18",
-            useMmol: true
+            useMmol: true,
+            alertLowMgdl: 70,
+            alertHighMgdl: 180
         )
         HeroCardView(
             reading: GlucoseReading(valueMgdl: 64, trend: .singleDown, date: .now),
             deltaMgdl: -12,
             displayName: "Josh",
             backgroundColorHex: "#070B18",
-            useMmol: false
+            useMmol: false,
+            alertLowMgdl: 70,
+            alertHighMgdl: 180
         )
     }
     .padding()

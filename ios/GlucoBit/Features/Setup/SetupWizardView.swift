@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Initial device configuration over BLE:
-/// scan → connect → WiFi creds → Dexcom creds (validated from the phone
-/// first) → send settings → wait for the device to join WiFi.
 struct SetupWizardView: View {
     @Environment(\.dismiss) private var dismiss
     let device: any DeviceManaging
@@ -72,6 +69,8 @@ struct SetupWizardView: View {
             .dexcomServer: dexcomServer,
             .displayName: displayName.isEmpty ? "GlucoBit" : displayName,
             .mmol: settings.useMmol,
+            .alertLowMgdl: settings.alertLowMgdl,
+            .alertHighMgdl: settings.alertHighMgdl,
             .setupMode: false,
         ]
     }

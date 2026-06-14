@@ -1,13 +1,12 @@
 import SwiftUI
 import WidgetKit
 
-/// Mini Theme-1: accent-colored value, trend arrow, status and reading age.
 struct SmallGlucoseView: View {
     let entry: GlucoseEntry
 
     private var status: GlucoseStatus {
         guard let r = entry.reading, !isStale(r) else { return .noData }
-        return GlucoseStatus(mgdl: r.valueMgdl)
+        return GlucoseStatus(mgdl: r.valueMgdl, lowMgdl: entry.alertLowMgdl, highMgdl: entry.alertHighMgdl)
     }
 
     private var accent: Color {

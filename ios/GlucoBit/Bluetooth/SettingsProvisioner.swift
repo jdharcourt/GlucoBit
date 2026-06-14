@@ -1,10 +1,5 @@
 import Foundation
 
-/// Sends a settings dictionary to the device using the chunked transfer
-/// protocol on the Settings Transfer characteristic:
-/// BEGIN (total length + CRC32) → DATA chunks → COMMIT → await ACK.
-/// The device merges the JSON into its existing settings.json, so partial
-/// updates (e.g. just a theme change) are fine.
 @MainActor
 struct SettingsProvisioner {
     let device: any DeviceManaging
@@ -19,6 +14,8 @@ struct SettingsProvisioner {
         case mmol = "MMOL"
         case backgroundColor = "BACKGROUND_COLOR"
         case uiTheme = "UI_THEME"
+        case alertLowMgdl = "ALERT_LOW_MGDL"
+        case alertHighMgdl = "ALERT_HIGH_MGDL"
         case setupMode = "SETUP_MODE"
     }
 

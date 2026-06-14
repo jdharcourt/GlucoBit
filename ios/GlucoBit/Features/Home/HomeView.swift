@@ -18,12 +18,16 @@ struct HomeView: View {
                     deltaMgdl: sync.store.deltaMgdl,
                     displayName: settings.displayName,
                     backgroundColorHex: settings.backgroundColorHex,
-                    useMmol: settings.useMmol
+                    useMmol: settings.useMmol,
+                    alertLowMgdl: settings.alertLowMgdl,
+                    alertHighMgdl: settings.alertHighMgdl
                 )
                 HistoryChartView(
                     readings: sync.store.readings,
                     useMmol: settings.useMmol,
-                    backgroundColorHex: settings.backgroundColorHex
+                    backgroundColorHex: settings.backgroundColorHex,
+                    alertLowMgdl: settings.alertLowMgdl,
+                    alertHighMgdl: settings.alertHighMgdl
                 )
                 if case .failed(let message) = sync.state {
                     Label(message, systemImage: "wifi.exclamationmark")
