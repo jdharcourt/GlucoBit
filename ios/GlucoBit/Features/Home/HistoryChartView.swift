@@ -23,8 +23,6 @@ struct HistoryChartView: View {
         }
     }
 
-    private var bgColor: Color { DeviceTheme.backgroundColor(hexString: backgroundColorHex) }
-
     private var visibleReadings: [GlucoseReading] {
         let cutoff = Date().addingTimeInterval(-Double(window.rawValue) * 3600)
         return readings.filter { $0.date >= cutoff }
@@ -34,7 +32,6 @@ struct HistoryChartView: View {
         useMmol ? r.valueMmol : Double(r.valueMgdl)
     }
 
-    // Target range band: 3.9–10 mmol / 70–180 mg/dL, matching the firmware.
     private var rangeLow: Double { useMmol ? 3.9 : 70 }
     private var rangeHigh: Double { useMmol ? 10.0 : 180 }
 
@@ -47,12 +44,11 @@ struct HistoryChartView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("HISTORY")
-                    .font(DeviceTheme.nunito(size: 11, weight: .semibold))
-                    .foregroundStyle(DeviceTheme.secondaryText)
-                    .tracking(1.2)
+                Text("History")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
                 Spacer()
                 Picker("Window", selection: $window) {
                     ForEach(Window.allCases) { w in
@@ -62,20 +58,25 @@ struct HistoryChartView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 160)
             }
+            .tint(AppTheme.accent)
 
             if visibleReadings.isEmpty {
                 Text("No readings yet")
-                    .font(DeviceTheme.nunito(size: 14))
-                    .foregroundStyle(DeviceTheme.statusNoData)
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.mutedText)
                     .frame(maxWidth: .infinity, minHeight: 180)
             } else {
                 chart
                     .frame(height: 200)
             }
         }
-        .padding(14)
-        .background(bgColor)
-        .clipShape(RoundedRectangle(cornerRadius: DeviceTheme.cardCornerRadius))
+        .padding(16)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.radius)
+                .stroke(AppTheme.border, lineWidth: 1)
+        }
     }
 
     private var chart: some View {
@@ -85,13 +86,13 @@ struct HistoryChartView: View {
                 yStart: .value("Low", rangeLow),
                 yEnd: .value("High", rangeHigh)
             )
-            .foregroundStyle(DeviceTheme.statusInRange.opacity(0.08))
+            .foregroundStyle(AppTheme.positive.opacity(0.08))
 
             RuleMark(y: .value("Low threshold", rangeLow))
-                .foregroundStyle(DeviceTheme.statusLow.opacity(0.4))
+                .foregroundStyle(AppTheme.danger.opacity(0.45))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
             RuleMark(y: .value("High threshold", rangeHigh))
-                .foregroundStyle(DeviceTheme.statusHigh.opacity(0.4))
+                .foregroundStyle(AppTheme.warning.opacity(0.45))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
             ForEach(visibleReadings) { reading in
@@ -100,21 +101,21 @@ struct HistoryChartView: View {
                     y: .value("Glucose", displayValue(reading))
                 )
                 .foregroundStyle(DeviceTheme.accentColor(mgdl: reading.valueMgdl))
-                .symbolSize(window == .day ? 14 : 28)
+                .symbolSize(window == .day ? 18 : 34)
             }
         }
         .chartYScale(domain: yDomain)
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine().foregroundStyle(DeviceTheme.secondaryText.opacity(0.15))
+                AxisGridLine().foregroundStyle(AppTheme.border)
                 AxisValueLabel(format: .dateTime.hour().minute())
-                    .foregroundStyle(DeviceTheme.secondaryText)
+                    .foregroundStyle(AppTheme.secondaryText)
             }
         }
         .chartYAxis {
             AxisMarks { _ in
-                AxisGridLine().foregroundStyle(DeviceTheme.secondaryText.opacity(0.15))
-                AxisValueLabel().foregroundStyle(DeviceTheme.secondaryText)
+                AxisGridLine().foregroundStyle(AppTheme.border)
+                AxisValueLabel().foregroundStyle(AppTheme.secondaryText)
             }
         }
     }

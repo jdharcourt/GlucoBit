@@ -40,6 +40,9 @@ struct DexcomCredentialsView: View {
             }
         }
         .navigationTitle("Dexcom Account")
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if validating {

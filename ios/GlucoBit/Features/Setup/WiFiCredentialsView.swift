@@ -19,6 +19,9 @@ struct WiFiCredentialsView: View {
             }
         }
         .navigationTitle("WiFi Network")
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Next", action: onNext)

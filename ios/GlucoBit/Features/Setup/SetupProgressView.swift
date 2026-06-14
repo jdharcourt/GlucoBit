@@ -16,39 +16,62 @@ struct SetupProgressView: View {
     @State private var wifiWaitTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             switch phase {
             case .sending:
                 ProgressView()
                     .controlSize(.large)
+                    .tint(AppTheme.accent)
                 Text("Sending settings to your GlucoBit…")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
 
             case .waitingForWifi:
                 ProgressView()
                     .controlSize(.large)
-                Text("Settings received. Waiting for the device to join WiFi…")
+                    .tint(AppTheme.accent)
+                Text("Waiting for WiFi")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
+                Text("Settings were received. The device is joining the network.")
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.secondaryText)
                     .multilineTextAlignment(.center)
 
             case .done:
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.green)
+                    .font(.system(size: 44))
+                    .foregroundStyle(AppTheme.positive)
                 Text("Your GlucoBit is online!")
-                    .font(.title2.bold())
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
                 Button("Finish") { onComplete() }
                     .buttonStyle(.borderedProminent)
 
             case .failed(let message):
                 Image(systemName: "xmark.octagon.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.red)
+                    .font(.system(size: 44))
+                    .foregroundStyle(AppTheme.danger)
                 Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(AppTheme.text)
                     .multilineTextAlignment(.center)
                 Button("Try Again") { start() }
                     .buttonStyle(.borderedProminent)
             }
         }
-        .padding()
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.radius)
+                .stroke(AppTheme.border, lineWidth: 1)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .navigationTitle("Setting Up")
         .navigationBarBackButtonHidden(phase == .sending || phase == .waitingForWifi)
         .onAppear { start() }

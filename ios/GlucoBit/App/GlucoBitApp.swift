@@ -54,6 +54,8 @@ struct RootView: View {
                 }
             }
         }
+        .tint(AppTheme.accent)
+        .background(AppTheme.background)
         .onAppear {
             if !container.settings.deviceConfigured && KeychainStore.dexcomCredentials == nil {
                 showSetupWizard = true

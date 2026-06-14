@@ -69,6 +69,9 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .sheet(isPresented: $showSetupWizard) {
             SetupWizardView(device: device, settings: settings, sync: sync)
         }
@@ -81,9 +84,8 @@ struct SettingsView: View {
             if let status = device.deviceStatus {
                 LabeledContent("Status") {
                     HStack(spacing: 6) {
-                        Circle()
-                            .fill(status.wifiConnected ? .green : .orange)
-                            .frame(width: 8, height: 8)
+                        Image(systemName: status.wifiConnected ? "checkmark.circle.fill" : "wifi.slash")
+                            .foregroundStyle(status.wifiConnected ? AppTheme.positive : AppTheme.warning)
                         Text(status.wifiConnected ? "Online (WiFi)" : "Connected (no WiFi)")
                     }
                 }
@@ -106,7 +108,6 @@ struct SettingsView: View {
     }
 }
 
-/// Edit and re-validate the Dexcom account stored in the Keychain.
 struct DexcomAccountView: View {
     let sync: GlucoseSyncService
 
@@ -137,6 +138,9 @@ struct DexcomAccountView: View {
             }
         }
         .navigationTitle("Dexcom Account")
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if saving {

@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// SwiftUI recreation of the device's Theme 1 (card-based) layout:
-/// header strip with name + clock, accent divider, large glucose card,
-/// and TREND / DELTA cards below.
 struct HeroCardView: View {
     let reading: GlucoseReading?
     let deltaMgdl: Int?
@@ -12,9 +9,6 @@ struct HeroCardView: View {
 
     @State private var now = Date()
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    private var bgColor: Color { DeviceTheme.backgroundColor(hexString: backgroundColorHex) }
-    private var lightBg: Color { DeviceTheme.lightened(bgColor) }
 
     private var status: GlucoseStatus {
         guard let reading, !reading.isStale else { return .noData }
@@ -27,90 +21,73 @@ struct HeroCardView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Rectangle()
-                .fill(accent)
-                .frame(height: 4)
-            VStack(spacing: 10) {
-                glucoseCard
-                HStack(spacing: 10) {
-                    trendCard
-                    deltaCard
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(displayName.isEmpty ? "GlucoBit" : displayName)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.text)
+                Spacer()
+                Text(now, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(AppTheme.secondaryText)
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text(reading.map { $0.displayValue(mmol: useMmol) } ?? "--")
+                    .font(.system(size: 72, weight: .semibold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                Text(useMmol ? "mmol/L" : "mg/dL")
+                    .font(.callout)
+                    .foregroundStyle(AppTheme.secondaryText)
+            }
+
+            VStack(spacing: 0) {
+                readingRow("Status", statusLabel, color: statusColor)
+                Divider().overlay(AppTheme.border)
+                readingRow("Trend", reading?.trend.displayText ?? "No trend", color: accent, icon: reading?.trend.symbolName ?? "minus")
+                Divider().overlay(AppTheme.border)
+                readingRow("Delta", deltaText, color: deltaColor)
+                if let reading, reading.isStale {
+                    Divider().overlay(AppTheme.border)
+                    readingRow("Updated", reading.date.formatted(.relative(presentation: .named)), color: AppTheme.mutedText)
                 }
             }
-            .padding(10)
+            .background(AppTheme.inset)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppTheme.radius)
+                    .stroke(AppTheme.border, lineWidth: 1)
+            }
         }
-        .background(lightBg)
-        .clipShape(RoundedRectangle(cornerRadius: DeviceTheme.cardCornerRadius))
+        .padding(16)
+        .background(AppTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppTheme.radius)
+                .stroke(AppTheme.border, lineWidth: 1)
+        }
         .onReceive(clock) { now = $0 }
     }
 
-    private var header: some View {
-        HStack {
-            Text(displayName.isEmpty ? "GlucoBit" : displayName)
-                .font(DeviceTheme.nunito(size: 15))
-                .foregroundStyle(DeviceTheme.headerText)
-            Spacer()
-            Text(now, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
-                .font(DeviceTheme.nunito(size: 15))
-                .monospacedDigit()
-                .foregroundStyle(DeviceTheme.clockText)
+    private var statusLabel: String {
+        switch status {
+        case .low: return "Low"
+        case .inRange: return "In range"
+        case .high: return "High"
+        case .veryHigh: return "Very high"
+        case .noData: return "No data"
         }
-        .padding(.horizontal, 14)
-        .frame(height: 40)
-        .background(bgColor)
     }
 
-    private var glucoseCard: some View {
-        VStack(spacing: 2) {
-            Text(status.rawValue)
-                .font(DeviceTheme.nunito(size: 14, weight: .semibold))
-                .foregroundStyle(DeviceTheme.statusColor(status))
-                .tracking(1.5)
-            Text(reading.map { $0.displayValue(mmol: useMmol) } ?? "--")
-                .font(DeviceTheme.nunito(size: 80, weight: .medium))
-                .foregroundStyle(accent)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-            Text(useMmol ? "mmol/L" : "mg/dL")
-                .font(DeviceTheme.nunito(size: 14))
-                .foregroundStyle(DeviceTheme.secondaryText)
-            if let reading, reading.isStale {
-                Text("Last reading \(reading.date, format: .relative(presentation: .named))")
-                    .font(DeviceTheme.nunito(size: 12))
-                    .foregroundStyle(DeviceTheme.statusNoData)
-            }
+    private var statusColor: Color {
+        switch status {
+        case .low: return AppTheme.danger
+        case .inRange: return AppTheme.positive
+        case .high, .veryHigh: return AppTheme.warning
+        case .noData: return AppTheme.mutedText
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .background(bgColor)
-        .clipShape(RoundedRectangle(cornerRadius: DeviceTheme.cardCornerRadius))
-    }
-
-    private var trendCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("TREND")
-                .font(DeviceTheme.nunito(size: 11, weight: .semibold))
-                .foregroundStyle(DeviceTheme.secondaryText)
-                .tracking(1.2)
-            HStack {
-                Spacer()
-                VStack(spacing: 4) {
-                    Image(systemName: reading?.trend.symbolName ?? "minus")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(accent)
-                    Text(reading?.trend.displayText ?? "—")
-                        .font(DeviceTheme.nunito(size: 13))
-                        .foregroundStyle(DeviceTheme.primaryText)
-                }
-                Spacer()
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 90)
-        .background(bgColor)
-        .clipShape(RoundedRectangle(cornerRadius: DeviceTheme.cardCornerRadius))
     }
 
     private var deltaText: String {
@@ -123,31 +100,28 @@ struct HeroCardView: View {
     }
 
     private var deltaColor: Color {
-        guard let deltaMgdl else { return DeviceTheme.deltaFlat }
-        if deltaMgdl < 0 { return DeviceTheme.deltaFalling }
-        if deltaMgdl > 0 { return DeviceTheme.deltaRising }
-        return DeviceTheme.deltaFlat
+        guard let deltaMgdl else { return AppTheme.mutedText    }
+        if deltaMgdl < 0 { return AppTheme.positive }
+        if deltaMgdl > 0 { return AppTheme.warning }
+        return AppTheme.secondaryText
     }
 
-    private var deltaCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("DELTA")
-                .font(DeviceTheme.nunito(size: 11, weight: .semibold))
-                .foregroundStyle(DeviceTheme.secondaryText)
-                .tracking(1.2)
-            HStack {
-                Spacer()
-                Text(deltaText)
-                    .font(DeviceTheme.nunito(size: 32, weight: .medium))
-                    .foregroundStyle(deltaColor)
-                Spacer()
+    private func readingRow(_ title: String, _ value: String, color: Color, icon: String? = nil) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.secondaryText)
+            Spacer()
+            if let icon {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
             }
-            .frame(maxHeight: .infinity)
+            Text(value)
+                .font(.subheadline.weight(.medium))
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 90)
-        .background(bgColor)
-        .clipShape(RoundedRectangle(cornerRadius: DeviceTheme.cardCornerRadius))
+        .foregroundStyle(color)
+        .padding(.horizontal, 12)
+        .frame(height: 44)
     }
 }
 

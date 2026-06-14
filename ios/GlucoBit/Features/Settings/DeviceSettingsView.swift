@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Display preferences pushed to the device over BLE as a partial settings
-/// update (the device merges keys, so WiFi/Dexcom credentials are untouched).
 struct DeviceSettingsView: View {
     let settings: AppSettings
     let device: any DeviceManaging
@@ -55,6 +53,9 @@ struct DeviceSettingsView: View {
             }
         }
         .navigationTitle("Device Display")
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if sending {

@@ -46,6 +46,9 @@ struct DeviceScanView: View {
                 Text("Make sure your GlucoBit is plugged in and nearby.")
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.background)
+        .tint(AppTheme.accent)
         .onAppear { device.startScanning() }
         .onDisappear { device.stopScanning() }
         .onChange(of: device.connectionState) { _, state in

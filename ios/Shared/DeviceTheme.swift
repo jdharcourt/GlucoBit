@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// Visual constants ported from the device firmware so the app and widget
-/// render glucose in the same style as the GlucoBit display (Theme 1).
 enum DeviceTheme {
-    // Fixed text colors used by the device's Theme 1.
     static let headerText = Color(hex: 0xDDE7FF)
     static let clockText = Color(hex: 0xEAF1FF)
     static let secondaryText = Color(hex: 0xAFC1E8)
@@ -20,7 +17,7 @@ enum DeviceTheme {
     static let deltaFlat = Color(hex: 0xB9C9EA)
 
     static let defaultBackgroundHex = "#070B18"
-    static let cardCornerRadius: CGFloat = 15
+    static let cardCornerRadius: CGFloat = 10
 
     static func statusColor(_ status: GlucoseStatus) -> Color {
         switch status {
@@ -32,7 +29,6 @@ enum DeviceTheme {
         }
     }
 
-    // Accent color stops from the firmware: (mmol, RGB), linearly interpolated.
     private static let colorStops: [(Double, (Double, Double, Double))] = [
         (3.0, (255, 50, 0)),
         (4.0, (255, 180, 0)),
@@ -43,7 +39,6 @@ enum DeviceTheme {
         (15.0, (200, 0, 150)),
     ]
 
-    /// Glucose-level accent color — exact port of the firmware's interpolation.
     static func accentColor(mmol: Double) -> Color {
         let stops = colorStops
         if mmol <= stops[0].0 {
@@ -71,12 +66,10 @@ enum DeviceTheme {
         accentColor(mmol: Double(mgdl) / 18.0)
     }
 
-    /// Parse a "#RRGGBB" settings string (BACKGROUND_COLOR).
     static func backgroundColor(hexString: String) -> Color {
         Color(hexString: hexString) ?? Color(hexString: defaultBackgroundHex)!
     }
 
-    /// The firmware's lighten_hex: blend 30% toward white.
     static func lightened(_ color: Color) -> Color {
         let c = UIColor(color)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
@@ -91,6 +84,21 @@ enum DeviceTheme {
     static func nunito(size: CGFloat, weight: Font.Weight = .medium) -> Font {
         Font.custom("Nunito", size: size).weight(weight)
     }
+}
+
+enum AppTheme {
+    static let background = Color(hex: 0x11110F)
+    static let surface = Color(hex: 0x191814)
+    static let inset = Color(hex: 0x222019)
+    static let border = Color(hex: 0x343127)
+    static let text = Color(hex: 0xF4F1E8)
+    static let secondaryText = Color(hex: 0xA8A195)
+    static let mutedText = Color(hex: 0x7D766C)
+    static let accent = Color(hex: 0xC6A15B)
+    static let positive = Color(hex: 0x6FA66A)
+    static let warning = Color(hex: 0xC18B44)
+    static let danger = Color(hex: 0xC75F53)
+    static let radius: CGFloat = 10
 }
 
 extension Color {
@@ -113,7 +121,6 @@ extension Color {
         self.init(hex: value)
     }
 
-    /// Back to "#RRGGBB" for storing in device settings.
     var settingsHexString: String {
         let c = UIColor(self)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
