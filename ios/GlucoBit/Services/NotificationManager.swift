@@ -3,10 +3,26 @@ import UserNotifications
 
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var lastAlertedStatus: GlucoseStatus?
+    private var criticalAlertsEnabled = false
+
+    override init() {
+        super.init()
+        Task {
+            await updateCriticalAlertStatus(UNUserNotificationCenter.current())
+        }
+    }
 
     func requestAuthorization() async -> Bool {
         let center = UNUserNotificationCenter.current()
-        return (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        do {
+            let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge, .criticalAlert])
+            await updateCriticalAlertStatus(center)
+            return granted
+        } catch {
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            await updateCriticalAlertStatus(center)
+            return granted
+        }
     }
 
     func evaluate(reading: GlucoseReading, useMmol: Bool, lowMgdl: Int, highMgdl: Int) {
@@ -20,8 +36,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         lastAlertedStatus = status
 
         let content = UNMutableNotificationContent()
-        content.interruptionLevel = .timeSensitive
-        content.sound = .defaultCritical
+        content.interruptionLevel = criticalAlertsEnabled ? .critical : .timeSensitive
+        content.sound = criticalAlertsEnabled ? .defaultCritical : .default
         let value = reading.displayValue(mmol: useMmol)
         let unit = useMmol ? "mmol/L" : "mg/dL"
 
@@ -51,6 +67,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        [.banner, .list, .sound]
+    }
+
+    private func updateCriticalAlertStatus(_ center: UNUserNotificationCenter) async {
+        let settings = await center.notificationSettings()
+        criticalAlertsEnabled = settings.criticalAlertSetting == .enabled
     }
 }

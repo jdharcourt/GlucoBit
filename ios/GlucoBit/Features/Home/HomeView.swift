@@ -23,7 +23,7 @@ struct HomeView: View {
                     alertLowMgdl: settings.alertLowMgdl,
                     alertHighMgdl: settings.alertHighMgdl
                 )
-                .frame(maxHeight: .infinity)
+                .frame(maxHeight: 250)
                 syncError
             }
             .padding(.horizontal, 16)
