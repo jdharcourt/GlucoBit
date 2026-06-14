@@ -79,7 +79,8 @@ struct HeroCardView: View {
                     .frame(width: radius * 2, height: radius * 2)
                     .position(center)
                 GaugePointer(angle: angle)
-                    .fill(AppTheme.lavender)
+                    .fill(accent)
+                    .shadow(color: .black.opacity(0.32), radius: 3, y: 1)
                     .frame(width: ringRadius * 2, height: ringRadius * 2)
                     .position(center)
                 Image(systemName: reading?.trend.symbolName ?? "arrow.right")
@@ -175,9 +176,9 @@ private struct GaugePointer: Shape {
     func path(in rect: CGRect) -> Path {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let radius = min(rect.width, rect.height) / 2
-        let tip = point(center: center, radius: radius * 0.72, angle: angle)
-        let base1 = point(center: center, radius: radius * 1.02, angle: angle - 5.2)
-        let base2 = point(center: center, radius: radius * 1.02, angle: angle + 5.2)
+        let tip = point(center: center, radius: radius * 0.84, angle: angle)
+        let base1 = point(center: center, radius: radius * 1.04, angle: angle - 3.4)
+        let base2 = point(center: center, radius: radius * 1.04, angle: angle + 3.4)
         var path = Path()
         path.move(to: tip)
         path.addLine(to: base1)

@@ -7,46 +7,36 @@ struct HomeView: View {
     let relay: GlucoseRelay
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                deviceBanner
+        GeometryReader { proxy in
+            VStack(alignment: .leading, spacing: 10) {
+                compactBanner
                 HeroCardView(
                     reading: sync.store.latest,
                     useMmol: settings.useMmol,
                     alertLowMgdl: settings.alertLowMgdl,
                     alertHighMgdl: settings.alertHighMgdl
                 )
+                .frame(height: max(260, min(360, proxy.size.height * 0.48)))
                 HistoryChartView(
                     readings: sync.store.readings,
                     useMmol: settings.useMmol,
                     alertLowMgdl: settings.alertLowMgdl,
                     alertHighMgdl: settings.alertHighMgdl
                 )
-                if case .failed(let message) = sync.state {
-                    Label(message, systemImage: "wifi.exclamationmark")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.warning)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(AppTheme.inset)
-                        .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: AppTheme.radius)
-                                .stroke(AppTheme.border, lineWidth: 1)
-                        }
-                }
+                .frame(maxHeight: .infinity)
+                syncError
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+            .clipped()
         }
         .background(AppTheme.background.ignoresSafeArea())
-        .refreshable {
-            await sync.sync(force: true)
-        }
     }
 
     @ViewBuilder
-    private var deviceBanner: some View {
+    private var compactBanner: some View {
         if settings.deviceConfigured {
             switch device.connectionState {
             case .connected:
@@ -66,6 +56,24 @@ struct HomeView: View {
             default:
                 EmptyView()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var syncError: some View {
+        if case .failed(let message) = sync.state {
+            Label(message, systemImage: "wifi.exclamationmark")
+                .font(.footnote)
+                .foregroundStyle(AppTheme.warning)
+                .lineLimit(1)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppTheme.inset)
+                .clipShape(RoundedRectangle(cornerRadius: AppTheme.radius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppTheme.radius)
+                        .stroke(AppTheme.border, lineWidth: 1)
+                }
         }
     }
 

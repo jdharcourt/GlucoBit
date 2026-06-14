@@ -50,10 +50,10 @@ struct HistoryChartView: View {
                 Text("No readings yet")
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.mutedText)
-                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 chart
-                    .frame(height: 220)
+                    .frame(maxHeight: .infinity)
             }
 
             Picker("Window", selection: $window) {
@@ -66,6 +66,7 @@ struct HistoryChartView: View {
             .tint(AppTheme.accent)
         }
         .padding(.horizontal, 8)
+        .padding(.bottom, 4)
     }
 
     private var chart: some View {
