@@ -8,6 +8,7 @@ struct HistoryChartView: View {
     let alertHighMgdl: Int
 
     @State private var window: Window = .threeHours
+    @State private var selectedReading: GlucoseReading?
 
     enum Window: Int, CaseIterable, Identifiable {
         case hour = 1
@@ -110,6 +111,36 @@ struct HistoryChartView: View {
                 .foregroundStyle(statusColor(latest))
                 .symbolSize(72)
             }
+
+            if let selectedReading {
+                RuleMark(x: .value("Selected time", selectedReading.date))
+                    .foregroundStyle(AppTheme.secondaryText.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                PointMark(
+                    x: .value("Selected time", selectedReading.date),
+                    y: .value("Selected glucose", displayValue(selectedReading))
+                )
+                .foregroundStyle(statusColor(selectedReading))
+                .symbolSize(96)
+                .annotation(position: .bottom, spacing: 8) {
+                    VStack(spacing: 2) {
+                        Text("\(selectedReading.displayValue(mmol: useMmol)) \(useMmol ? "mmol/L" : "mg/dL")")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.secondaryText)
+                        Text(selectedReading.date, format: .dateTime.hour().minute())
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(AppTheme.secondaryText)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(AppTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(AppTheme.border, lineWidth: 1)
+                    }
+                }
+            }
         }
         .chartYScale(domain: yDomain)
         .chartXAxis {
@@ -125,6 +156,22 @@ struct HistoryChartView: View {
                 AxisValueLabel().foregroundStyle(AppTheme.secondaryText)
             }
         }
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                selectReading(at: value.location, proxy: proxy, geometry: geometry)
+                            }
+                            .onEnded { _ in
+                                selectedReading = nil
+                            }
+                    )
+            }
+        }
     }
 
     private func statusColor(_ reading: GlucoseReading) -> Color {
@@ -132,6 +179,15 @@ struct HistoryChartView: View {
         case .low: return AppTheme.danger
         case .high, .veryHigh: return AppTheme.warning
         case .inRange, .noData: return AppTheme.positive
+        }
+    }
+
+    private func selectReading(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
+        let frame = geometry[proxy.plotAreaFrame]
+        let x = location.x - frame.origin.x
+        guard x >= 0, x <= frame.width, let date = proxy.value(atX: x, as: Date.self) else { return }
+        selectedReading = visibleReadings.min {
+            abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
         }
     }
 }
