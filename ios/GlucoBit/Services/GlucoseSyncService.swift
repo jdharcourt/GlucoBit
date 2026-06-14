@@ -77,7 +77,7 @@ final class GlucoseSyncService {
     func startForegroundPolling() {
         stopForegroundPolling()
         Task { await sync() }
-        foregroundTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: true) { [weak self] _ in
+        foregroundTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.sync() }
         }
     }

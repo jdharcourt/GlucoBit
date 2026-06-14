@@ -301,7 +301,7 @@ class GlucoBitBLE:
 
         now = time.monotonic()
         needs_data = bool(flags & 0x04)
-        heartbeat_due = needs_data and (now - self._last_status_notify >= 60)
+        heartbeat_due = needs_data and (now - self._last_status_notify >= 30)
 
         if packed == self._last_status and not force and not heartbeat_due:
             return

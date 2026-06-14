@@ -42,7 +42,7 @@ actor DexcomShareClient {
     private var backoffUntil: Date?
 
     /// Minimum spacing between fetches, to stay well clear of Dexcom rate limits.
-    private let minFetchInterval: TimeInterval = 60
+    private let minFetchInterval: TimeInterval = 30
 
     func configure(_ credentials: Credentials) {
         if credentials != self.credentials {

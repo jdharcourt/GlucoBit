@@ -66,6 +66,7 @@ last_low = None
 last_reading = None
 last_triggered_value = None
 last_glucose_cache = None  # (value, trend, latest_reading_time, prev_value)
+next_glucose_fetch_time = 0
 
 LOW = 2
 HIGH = 17
@@ -93,6 +94,11 @@ LED_TEST = False
 
 # OTA check interval in seconds; keep this conservative to avoid network churn.
 version_check = 3600
+glucose_retry_interval = 20
+glucose_error_retry_interval = 60
+glucose_fallback_interval = 90
+glucose_reading_interval = 300
+glucose_reading_grace = 12
 
 
 
@@ -481,7 +487,6 @@ def get_version():
 
 
 def wt_to_epoch(wt):
-    """Dexcom WT timestamp '/Date(1718106000000)/' (ms) -> epoch seconds."""
     try:
         start = wt.index("(") + 1
         digits = ""
@@ -494,6 +499,19 @@ def wt_to_epoch(wt):
     except Exception:
         return None
 
+
+def next_glucose_poll_time(reading_epoch):
+    if reading_epoch is None:
+        return time.monotonic() + glucose_fallback_interval
+    try:
+        delay = reading_epoch + glucose_reading_interval + glucose_reading_grace - time.time()
+    except Exception:
+        delay = glucose_fallback_interval
+    if delay < glucose_retry_interval:
+        delay = glucose_retry_interval
+    if delay > glucose_reading_interval:
+        delay = glucose_reading_interval
+    return time.monotonic() + delay
 
 
 def start_ap_mode():
@@ -1801,7 +1819,7 @@ if settings.get("BLE_ENABLED", True):
 
 def apply_pending_settings():
     global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
-    global web_server, pool, https, session, last_fetch_time, last_reading, last_glucose_cache
+    global web_server, pool, https, session, next_glucose_fetch_time, last_reading, last_glucose_cache
 
     if not (pending_wifi_reconnect or pending_session_refresh or pending_display_refresh):
         return
@@ -1842,7 +1860,7 @@ def apply_pending_settings():
         if last_glucose_cache is not None:
             show_glucose(*last_glucose_cache)
         else:
-            last_fetch_time = 0
+            next_glucose_fetch_time = 0
             last_reading = None
 
     pending_wifi_reconnect = False
@@ -1865,7 +1883,6 @@ if wifi.radio.connected:
 
 
 print("Starting main glucose loop")
-last_fetch_time = 0
 last_update_check = 0
 first_fetch = True
 first_check = True
@@ -1881,19 +1898,24 @@ while True:
         time_label.text = f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d}"
 
     # Glucose Fetch
-    if wifi.radio.connected and (time.monotonic() - last_fetch_time >= 90 or first_fetch): # Checks if WiFi is connected and last fetch was >90 secs
+    now = time.monotonic()
+    if wifi.radio.connected and (now >= next_glucose_fetch_time or first_fetch):
         first_fetch = False
         points = get_glucose(https, session)
         if points and len(points) == 3:
             (value, trend), (prev_value, _), latest_reading_time = points
             epoch = wt_to_epoch(latest_reading_time)
-            # Never clobber a newer BLE-relayed reading with a stale fetch.
-            if epoch is None or last_reading_epoch is None or epoch >= last_reading_epoch:
+            if epoch is None or last_reading_epoch is None or epoch > last_reading_epoch:
                 last_glucose_cache = (value, trend, latest_reading_time, prev_value)
                 show_glucose(value, trend, latest_reading_time, prev_value)
                 if epoch is not None:
                     last_reading_epoch = epoch
                 last_reading_monotonic = time.monotonic()
+                next_glucose_fetch_time = next_glucose_poll_time(epoch)
+            elif epoch == last_reading_epoch:
+                next_glucose_fetch_time = time.monotonic() + glucose_retry_interval
+            else:
+                next_glucose_fetch_time = next_glucose_poll_time(last_reading_epoch)
         else:
             session = dexcom_login(https) or session
             if is_setup_needed():
@@ -1901,7 +1923,7 @@ while True:
                 show_setup_screen(ip)
             else:
                 show_glucose(None, None, None)
-        last_fetch_time = time.monotonic()
+            next_glucose_fetch_time = time.monotonic() + glucose_error_retry_interval
 
     # Reading relayed from the companion app over BLE (typically while WiFi
     # is down, but also when fetches are failing and the reading went stale)
@@ -1914,6 +1936,7 @@ while True:
             show_glucose(value, trend, ts, prev_value)
             last_reading_epoch = ts
             last_reading_monotonic = time.monotonic()
+            next_glucose_fetch_time = next_glucose_poll_time(ts)
 
     if wifi.radio.connected and (time.monotonic() - last_update_check >= version_check or first_check):
         last_update_check = time.monotonic()
