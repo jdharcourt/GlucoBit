@@ -267,6 +267,46 @@ except Exception as e:
 # config
 SETTINGS_FILE = "settings.json"
 
+# Settings are persisted to microcontroller.nvm (device-private, always
+# writable from code) instead of a file on the CIRCUITPY flash. This decouples
+# settings persistence from the shared filesystem: the device can save settings
+# at any time without owning the filesystem, so the Mac can keep write access
+# for pushing code. settings.json remains as a committed seed for first boot.
+# Layout: 4-byte magic | 2-byte little-endian length | JSON payload.
+NVM_MAGIC = b"GBS1"
+
+
+def load_settings_nvm():
+    """Return the settings dict stored in NVM, or None if absent/invalid."""
+    nvm = microcontroller.nvm
+    if nvm is None or len(nvm) < 6 or bytes(nvm[0:4]) != NVM_MAGIC:
+        return None
+    n = int.from_bytes(bytes(nvm[4:6]), "little")
+    if n == 0 or n > len(nvm) - 6:
+        return None
+    try:
+        return json.loads(bytes(nvm[6:6 + n]))
+    except Exception as e:
+        print("NVM settings decode failed:", e)
+        return None
+
+
+def save_settings_nvm(s):
+    """Serialise the settings dict to NVM. Returns True on success."""
+    nvm = microcontroller.nvm
+    if nvm is None:
+        return False
+    try:
+        raw = json.dumps(s).encode("utf-8")
+    except Exception as e:
+        print("NVM settings encode failed:", e)
+        return False
+    if len(raw) > len(nvm) - 6:
+        print("NVM settings too large:", len(raw), "of", len(nvm) - 6)
+        return False
+    nvm[0:6 + len(raw)] = NVM_MAGIC + len(raw).to_bytes(2, "little") + raw
+    return True
+
 # Default settings
 default_settings = {
     "WIFI_SSID": "F.B.I Surveillance Van",
@@ -331,7 +371,9 @@ boot_msg = label.Label(
 )
 
 
-# Load settings from file
+# Load settings: start from defaults, seed from settings.json (committed
+# defaults / first-boot provisioning), then overlay NVM which is the runtime
+# source of truth once the UI has saved at least once.
 settings = default_settings.copy()
 if SETTINGS_FILE in os.listdir():
     try:
@@ -342,9 +384,13 @@ if SETTINGS_FILE in os.listdir():
             if isinstance(value, str):
                 loaded_settings[key] = url_decode(value)
         settings.update(loaded_settings)
-        print("Loaded settings from file.")
+        print("Loaded settings from file (seed).")
     except Exception as e:
         print(f"Failed to load settings: {e}")
+nvm_settings = load_settings_nvm()
+if nvm_settings:
+    settings.update(nvm_settings)
+    print("Loaded settings from NVM.")
 normalize_alert_thresholds(settings)
 
 # Extract settings to variables
@@ -368,8 +414,9 @@ if UI_THEME not in (1, 2, 3):
 
 def is_setup_needed():
     return (
-        DISPLAY_NAME == "DexcomFollowerName"
-        or not DEXCOM_USERNAME
+        not DEXCOM_USERNAME
+        or not settings.get("DEXCOM_PASSWORD")
+        or not WIFI_SSID
         or settings.get("SETUP_MODE", False)
     )
 
@@ -397,15 +444,10 @@ def apply_new_settings(updates):
         theme_value = 1
     settings["UI_THEME"] = theme_value
 
-    try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(settings, f)
-            f.flush()
-            os.sync()
-        print("Settings written to flash.")
-    except Exception as e:
-        print("Settings write failed:", e)
+    if not save_settings_nvm(settings):
+        print("Settings write to NVM failed.")
         return False, False
+    print("Settings written to NVM.")
 
     globals().update(settings)
 
@@ -1642,7 +1684,7 @@ def start_webserver(pool, https_session, ap_mode=False):
         if not ok:
             return Response(
                 request,
-                "<script>alert('ERROR: Could not write settings.json'); window.location='/';</script>",
+                "<script>alert('ERROR: Could not save settings'); window.location='/';</script>",
                 content_type="text/html"
             )
 
@@ -1663,13 +1705,8 @@ def start_webserver(pool, https_session, ap_mode=False):
     def reset_setup(request: Request):
         global settings, pending_display_refresh
         settings["SETUP_MODE"] = True
-        try:
-            with open(SETTINGS_FILE, "w") as f:
-                json.dump(settings, f)
-                f.flush()
-                os.sync()
-        except Exception as e:
-            print("reset-setup write failed:", e)
+        if not save_settings_nvm(settings):
+            print("reset-setup NVM write failed.")
         pending_display_refresh = True
         return Response(request, "", content_type="text/plain")
     

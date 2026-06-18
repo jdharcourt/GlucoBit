@@ -576,7 +576,7 @@
       "plot": "Gerbers/",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "GlucoBit-v2.step",
       "svg": "",
       "vrml": ""
     },
