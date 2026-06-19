@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import CoreHaptics
 
 struct HistoryChartView: View {
     let readings: [GlucoseReading]
@@ -9,6 +10,8 @@ struct HistoryChartView: View {
 
     @State private var window: Window = .threeHours
     @State private var selectedReading: GlucoseReading?
+    @State private var engine: CHHapticEngine?
+    @State private var lastHapticReadingID: Date?
 
     enum Window: Int, CaseIterable, Identifiable {
         case hour = 1
@@ -25,9 +28,24 @@ struct HistoryChartView: View {
         }
     }
 
+    private struct ChartSegment: Identifiable {
+        let id = UUID()
+        let readings: [GlucoseReading]
+        let isStale: Bool
+    }
+
     private var visibleReadings: [GlucoseReading] {
         let cutoff = Date().addingTimeInterval(-Double(window.rawValue) * 3600)
         return readings.filter { $0.date >= cutoff }
+    }
+
+    private var chartSegments: [ChartSegment] {
+        zip(visibleReadings, visibleReadings.dropFirst()).map { previous, current in
+            ChartSegment(
+                readings: [previous, current],
+                isStale: current.date.timeIntervalSince(previous.date) > 7.5 * 60
+            )
+        }
     }
 
     private func displayValue(_ r: GlucoseReading) -> Double {
@@ -37,6 +55,12 @@ struct HistoryChartView: View {
     private var rangeLow: Double { useMmol ? Double(alertLowMgdl) / 18.0 : Double(alertLowMgdl) }
     private var rangeHigh: Double { useMmol ? Double(alertHighMgdl) / 18.0 : Double(alertHighMgdl) }
 
+    
+    private var xDomain: ClosedRange<Date> {
+        let end = Date()
+        return end.addingTimeInterval(-Double(window.rawValue) * 3600)...end
+    }
+    
     private var yDomain: ClosedRange<Double> {
         let values = visibleReadings.map(displayValue(_:))
         let lo = min(values.min() ?? rangeLow, rangeLow)
@@ -68,6 +92,10 @@ struct HistoryChartView: View {
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 4)
+        .onAppear {
+            prepareHaptics()
+        }
+        
     }
 
     private var chart: some View {
@@ -86,21 +114,24 @@ struct HistoryChartView: View {
                 .foregroundStyle(AppTheme.accent.opacity(0.45))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
 
-            ForEach(visibleReadings) { reading in
-                LineMark(
-                    x: .value("Time", reading.date),
-                    y: .value("Glucose", displayValue(reading))
-                )
-                .foregroundStyle(AppTheme.chart)
-                .lineStyle(StrokeStyle(lineWidth: 3.4, lineCap: .round, lineJoin: .round))
-                .interpolationMethod(.catmullRom)
-                AreaMark(
-                    x: .value("Time", reading.date),
-                    yStart: .value("Baseline", yDomain.lowerBound),
-                    yEnd: .value("Glucose", displayValue(reading))
-                )
-                .foregroundStyle(AppTheme.chart.opacity(0.16))
-                .interpolationMethod(.catmullRom)
+            ForEach(chartSegments) { segment in
+                ForEach(segment.readings) { reading in
+                    LineMark(
+                        x: .value("Time", reading.date),
+                        y: .value("Glucose", displayValue(reading)),
+                        series: .value("Segment", segment.id.uuidString)
+                    )
+                    .foregroundStyle(AppTheme.chart)
+                    .lineStyle(
+                        StrokeStyle(
+                            lineWidth: 3.4,
+                            lineCap: .round,
+                            lineJoin: .round,
+                            dash: segment.isStale ? [6, 6] : []
+                        )
+                    )
+                    .interpolationMethod(.linear)
+                }
             }
 
             if let latest = visibleReadings.last {
@@ -116,6 +147,7 @@ struct HistoryChartView: View {
                 RuleMark(x: .value("Selected time", selectedReading.date))
                     .foregroundStyle(AppTheme.secondaryText.opacity(0.45))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                
                 PointMark(
                     x: .value("Selected time", selectedReading.date),
                     y: .value("Selected glucose", displayValue(selectedReading))
@@ -143,6 +175,7 @@ struct HistoryChartView: View {
             }
         }
         .chartYScale(domain: yDomain)
+        .chartXScale(domain: xDomain)
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 4)) { _ in
                 AxisGridLine().foregroundStyle(Color.white.opacity(0.07))
@@ -168,9 +201,60 @@ struct HistoryChartView: View {
                             }
                             .onEnded { _ in
                                 selectedReading = nil
+                                lastHapticReadingID = nil
                             }
                     )
             }
+        }
+    }
+    
+    func prepareHaptics() {
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            print("Haptics not supported on this device.")
+            return
+        }
+        
+        do {
+            engine = try CHHapticEngine()
+            engine?.stoppedHandler = { reason in
+                print("Haptic engine stopped: \(reason.rawValue)")
+                do {
+                    try self.engine?.start()
+                } catch {
+                    print("Failed to restart engine: \(error.localizedDescription)")
+                }
+            }
+            engine?.resetHandler = {
+                do {
+                    try self.engine?.start()
+                } catch {
+                    print("Failed to restart engine after reset: \(error.localizedDescription)")
+                }
+            }
+            try engine?.start()
+        } catch {
+            print("Error creating haptic engine: \(error.localizedDescription)")
+        }
+    }
+    
+    func vibrate() {
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics, let engine = engine else {
+            print("Haptics not supported or engine not initialized.")
+            return
+        }
+        
+        var events = [CHHapticEvent]()
+        let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 1)
+        let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 1)
+        let event = CHHapticEvent(eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0)
+        events.append(event)
+        
+        do {
+            let pattern = try CHHapticPattern(events: events, parameters: [])
+            let player = try engine.makePlayer(with: pattern)
+            try player.start(atTime: 0)
+        } catch {
+            print("Failed to play pattern: \(error.localizedDescription)")
         }
     }
 
@@ -186,8 +270,13 @@ struct HistoryChartView: View {
         let frame = geometry[proxy.plotAreaFrame]
         let x = location.x - frame.origin.x
         guard x >= 0, x <= frame.width, let date = proxy.value(atX: x, as: Date.self) else { return }
-        selectedReading = visibleReadings.min {
+        guard let reading = visibleReadings.min(by: {
             abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+        }) else { return }
+        selectedReading = reading
+        if lastHapticReadingID != reading.id {
+            lastHapticReadingID = reading.id
+            vibrate()
         }
     }
 }
