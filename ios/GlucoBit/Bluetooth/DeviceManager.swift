@@ -33,6 +33,7 @@ protocol DeviceManaging: AnyObject {
     func disconnect()
     func writeSettings(_ data: Data) async throws
     func writeGlucose(_ data: Data) async throws
+    func scanWiFiNetworks() async throws -> [WiFiNetwork]
 }
 
 enum DeviceError: LocalizedError {
@@ -41,6 +42,7 @@ enum DeviceError: LocalizedError {
     case writeFailed(String)
     case ackTimeout
     case deviceRejected(GlucoBitGATT.ControlPacket.Code)
+    case scanInProgress
 
     var errorDescription: String? {
         switch self {
@@ -49,6 +51,7 @@ enum DeviceError: LocalizedError {
         case .writeFailed(let reason): return "Bluetooth write failed: \(reason)"
         case .ackTimeout: return "Device didn't acknowledge in time."
         case .deviceRejected(let code): return "Device rejected the transfer (\(code))."
+        case .scanInProgress: return "A WiFi scan is already running."
         }
     }
 }
@@ -70,7 +73,12 @@ final class DeviceManager: NSObject, DeviceManaging {
     private var glucoseChar: CBCharacteristic?
     private var statusChar: CBCharacteristic?
     private var controlChar: CBCharacteristic?
+    private var wifiScanChar: CBCharacteristic?
     private var writeContinuation: CheckedContinuation<Void, Error>?
+    private var wifiScanContinuation: CheckedContinuation<[WiFiNetwork], Error>?
+    private var wifiScanExpectedLength = 0
+    private var wifiScanCRC: UInt32 = 0
+    private var wifiScanBuffer = Data()
     private var shouldScan = false
 
     private let settings: AppSettings
@@ -146,12 +154,84 @@ final class DeviceManager: NSObject, DeviceManaging {
         try await write(data, to: glucoseChar)
     }
 
+    func scanWiFiNetworks() async throws -> [WiFiNetwork] {
+        guard let peripheral, connectionState == .connected else { throw DeviceError.notConnected }
+        guard let wifiScanChar else { throw DeviceError.characteristicMissing }
+        guard wifiScanContinuation == nil else { throw DeviceError.scanInProgress }
+        wifiScanExpectedLength = 0
+        wifiScanCRC = 0
+        wifiScanBuffer.removeAll(keepingCapacity: false)
+        return try await withCheckedThrowingContinuation { continuation in
+            wifiScanContinuation = continuation
+            peripheral.writeValue(Data([GlucoBitGATT.WiFiScanOp.request.rawValue]), for: wifiScanChar, type: .withResponse)
+            Task {
+                try? await Task.sleep(for: .seconds(12))
+                await MainActor.run {
+                    if self.wifiScanContinuation != nil {
+                        self.finishWiFiScan(.failure(DeviceError.ackTimeout))
+                    }
+                }
+            }
+        }
+    }
+
     private func write(_ data: Data, to characteristic: CBCharacteristic?) async throws {
         guard let peripheral, connectionState == .connected else { throw DeviceError.notConnected }
         guard let characteristic else { throw DeviceError.characteristicMissing }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             writeContinuation = continuation
             peripheral.writeValue(data, for: characteristic, type: .withResponse)
+        }
+    }
+
+    private func handleWiFiScanPacket(_ data: Data) {
+        guard let rawOp = data.first,
+              let op = GlucoBitGATT.WiFiScanOp(rawValue: rawOp) else { return }
+        switch op {
+        case .begin:
+            guard data.count >= 7 else {
+                finishWiFiScan(.failure(DeviceError.writeFailed("Invalid WiFi scan response.")))
+                return
+            }
+            let bytes = [UInt8](data)
+            wifiScanExpectedLength = Int(UInt16(bytes[1]) | (UInt16(bytes[2]) << 8))
+            wifiScanCRC = UInt32(bytes[3]) | (UInt32(bytes[4]) << 8) | (UInt32(bytes[5]) << 16) | (UInt32(bytes[6]) << 24)
+            wifiScanBuffer.removeAll(keepingCapacity: true)
+        case .data:
+            guard data.count >= 2 else { return }
+            wifiScanBuffer.append(contentsOf: data.dropFirst(2))
+        case .commit:
+            guard wifiScanBuffer.count == wifiScanExpectedLength else {
+                finishWiFiScan(.failure(DeviceError.writeFailed("Incomplete WiFi scan response.")))
+                return
+            }
+            guard wifiScanBuffer.crc32 == wifiScanCRC else {
+                finishWiFiScan(.failure(DeviceError.writeFailed("Invalid WiFi scan checksum.")))
+                return
+            }
+            do {
+                finishWiFiScan(.success(try JSONDecoder().decode([WiFiNetwork].self, from: wifiScanBuffer)))
+            } catch {
+                finishWiFiScan(.failure(error))
+            }
+        case .error:
+            finishWiFiScan(.failure(DeviceError.writeFailed("WiFi scan failed.")))
+        case .request:
+            break
+        }
+    }
+
+    private func finishWiFiScan(_ result: Result<[WiFiNetwork], Error>) {
+        guard let continuation = wifiScanContinuation else { return }
+        wifiScanContinuation = nil
+        wifiScanExpectedLength = 0
+        wifiScanCRC = 0
+        wifiScanBuffer.removeAll(keepingCapacity: false)
+        switch result {
+        case .success(let networks):
+            continuation.resume(returning: networks)
+        case .failure(let error):
+            continuation.resume(throwing: error)
         }
     }
 }
@@ -236,8 +316,10 @@ extension DeviceManager: CBCentralManagerDelegate {
             self.glucoseChar = nil
             self.statusChar = nil
             self.controlChar = nil
+            self.wifiScanChar = nil
             self.writeContinuation?.resume(throwing: DeviceError.notConnected)
             self.writeContinuation = nil
+            self.finishWiFiScan(.failure(DeviceError.notConnected))
             // Keep a pending connect outstanding so we reattach the moment
             // the device advertises again (works while backgrounded).
             self.reconnectIfPaired()
@@ -250,7 +332,7 @@ extension DeviceManager: CBPeripheralDelegate {
         guard let service = peripheral.services?.first(where: { $0.uuid == GlucoBitGATT.service }) else { return }
         peripheral.discoverCharacteristics(
             [GlucoBitGATT.settingsTransfer, GlucoBitGATT.controlAck,
-             GlucoBitGATT.glucosePush, GlucoBitGATT.deviceStatus],
+             GlucoBitGATT.glucosePush, GlucoBitGATT.deviceStatus, GlucoBitGATT.wifiScan],
             for: service
         )
     }
@@ -272,6 +354,9 @@ extension DeviceManager: CBPeripheralDelegate {
                     peripheral.readValue(for: char)
                 case GlucoBitGATT.controlAck:
                     self.controlChar = char
+                    peripheral.setNotifyValue(true, for: char)
+                case GlucoBitGATT.wifiScan:
+                    self.wifiScanChar = char
                     peripheral.setNotifyValue(true, for: char)
                 default:
                     break
@@ -300,6 +385,8 @@ extension DeviceManager: CBPeripheralDelegate {
                 if let packet = GlucoBitGATT.ControlPacket(data: data) {
                     self.controlContinuation.yield(packet)
                 }
+            case GlucoBitGATT.wifiScan:
+                self.handleWiFiScanPacket(data)
             default:
                 break
             }
@@ -378,5 +465,14 @@ final class MockDeviceManager: DeviceManaging {
         controlContinuation.yield(
             GlucoBitGATT.ControlPacket(data: Data([0x20, 0, 0, 0]))!
         )
+    }
+
+    func scanWiFiNetworks() async throws -> [WiFiNetwork] {
+        try? await Task.sleep(for: .seconds(1))
+        return [
+            WiFiNetwork(ssid: "Kitchen", rssi: -42),
+            WiFiNetwork(ssid: "Office", rssi: -55),
+            WiFiNetwork(ssid: "Guest", rssi: -68),
+        ]
     }
 }

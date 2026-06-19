@@ -13,8 +13,6 @@ struct DeviceSettingsView: View {
     @State private var alertHighMgdl: Int
     @State private var sending = false
     @State private var error: String?
-    @State private var wifiSSID = KeychainStore.get(.deviceWifiSSID) ?? ""
-    @State private var wifiPassword = KeychainStore.get(.deviceWifiPassword) ?? ""
 
     init(settings: AppSettings, device: any DeviceManaging) {
         self.settings = settings
@@ -47,13 +45,16 @@ struct DeviceSettingsView: View {
                 Stepper("Low alert: \(thresholdText(alertLowMgdl))", value: $alertLowMgdl, in: 55...120, step: 5)
                 Stepper("High alert: \(thresholdText(alertHighMgdl))", value: $alertHighMgdl, in: 120...300, step: 5)
             }
-            
-            
-            Section("WiFi") {
-                TextField("Network name", text: $wifiSSID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                SecureField("Password", text: $wifiPassword)
+
+            Section("Connection") {
+                NavigationLink {
+                    WifiView(device: device)
+                } label: {
+                    HStack {
+                        Image(systemName: "wifi")
+                        Text("Configure WiFi")
+                    }
+                }
             }
 
             if device.connectionState != .connected {
@@ -104,8 +105,6 @@ struct DeviceSettingsView: View {
         settings.useMmol = useMmol
         settings.alertLowMgdl = alertLowMgdl
         settings.alertHighMgdl = alertHighMgdl
-        KeychainStore.set(wifiSSID, for: .deviceWifiSSID)
-        KeychainStore.set(wifiPassword, for: .deviceWifiPassword)
         guard device.connectionState == .connected else {
             sending = false
             dismiss()
@@ -120,8 +119,6 @@ struct DeviceSettingsView: View {
                     .mmol: useMmol,
                     .alertLowMgdl: alertLowMgdl,
                     .alertHighMgdl: alertHighMgdl,
-                    .wifiSSID: wifiSSID,
-                    .wifiPassword: wifiPassword,
                 ])
                 sending = false
                 dismiss()

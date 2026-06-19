@@ -3063,6 +3063,17 @@
 			(uuid "87c6dc24-0a74-48b5-a245-0f2170adadfa")
 		)
 		(embedded_fonts no)
+		(model "/Users/jdharc/Downloads/B8B-XH-A--3DModel-STEP-56544.STEP"
+			(offset
+				(xyz 9 0.5 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz -90 -0 -0)
+			)
+		)
 	)
 	(footprint "Capacitor_SMD:C_0603_1608Metric"
 		(layer "F.Cu")

@@ -1,4 +1,11 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+typealias PlatformColor = UIColor
+#elseif canImport(AppKit)
+import AppKit
+typealias PlatformColor = NSColor
+#endif
 
 enum DeviceTheme {
     static let headerText = Color(hex: 0xDDE7FF)
@@ -71,7 +78,7 @@ enum DeviceTheme {
     }
 
     static func lightened(_ color: Color) -> Color {
-        let c = UIColor(color)
+        let c = PlatformColor(color)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getRed(&r, green: &g, blue: &b, alpha: &a)
         return Color(
@@ -126,7 +133,7 @@ extension Color {
     }
 
     var settingsHexString: String {
-        let c = UIColor(self)
+        let c = PlatformColor(self)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getRed(&r, green: &g, blue: &b, alpha: &a)
         return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))

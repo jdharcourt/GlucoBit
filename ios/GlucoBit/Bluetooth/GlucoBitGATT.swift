@@ -9,6 +9,7 @@ enum GlucoBitGATT {
     static let controlAck = CBUUID(string: "C0DE0003-1B34-4C8A-9F2E-6A4D5B7C8E01")
     static let glucosePush = CBUUID(string: "C0DE0004-1B34-4C8A-9F2E-6A4D5B7C8E01")
     static let deviceStatus = CBUUID(string: "C0DE0005-1B34-4C8A-9F2E-6A4D5B7C8E01")
+    static let wifiScan = CBUUID(string: "C0DE0006-1B34-4C8A-9F2E-6A4D5B7C8E01")
 
     /// Max JSON bytes per settings DATA chunk (stays under typical iOS MTU).
     static let settingsChunkSize = 160
@@ -18,6 +19,14 @@ enum GlucoBitGATT {
         case begin = 0x01
         case data = 0x02
         case commit = 0x03
+    }
+
+    enum WiFiScanOp: UInt8 {
+        case request = 0x30
+        case begin = 0x31
+        case data = 0x32
+        case commit = 0x33
+        case error = 0x34
     }
 
     // Control/ACK packet: op u8, code u8, detail u16

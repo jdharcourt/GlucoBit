@@ -29,7 +29,7 @@ struct SetupWizardView: View {
             .navigationDestination(for: Step.self) { step in
                 switch step {
                 case .wifi:
-                    WiFiCredentialsView(ssid: $wifiSSID, password: $wifiPassword) {
+                    WiFiCredentialsView(ssid: $wifiSSID, password: $wifiPassword, device: device) {
                         path.append(.dexcom)
                     }
                 case .dexcom:

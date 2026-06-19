@@ -45,6 +45,11 @@ _OP_COMMIT = 0x03
 # Control/ACK opcodes
 _ACK_SETTINGS = 0x10
 _ACK_GLUCOSE = 0x20
+_SCAN_REQUEST = 0x30
+_SCAN_BEGIN = 0x31
+_SCAN_DATA = 0x32
+_SCAN_COMMIT = 0x33
+_SCAN_ERROR = 0x34
 
 # ACK codes
 ACK_OK = 0
@@ -73,7 +78,7 @@ class GlucoBitBLE:
     queue inside _bleio PacketBuffers, so nothing is lost while the loop is
     busy (including during the blocking alarm loop)."""
 
-    def __init__(self, on_settings, on_glucose, get_status):
+    def __init__(self, on_settings, on_glucose, get_status, on_wifi_scan=None):
         """
         on_settings(dict) -> bool   apply merged settings; True on success
         on_glucose(value_mgdl, trend_str, ts, prev_value, prev_ts) -> bool
@@ -85,6 +90,7 @@ class GlucoBitBLE:
         self._on_settings = on_settings
         self._on_glucose = on_glucose
         self._get_status = get_status
+        self._on_wifi_scan = on_wifi_scan
 
         self._rx_buf = bytearray(244)
         self._settings_buf = None
@@ -136,13 +142,24 @@ class GlucoBitBLE:
             max_length=7,
             fixed_length=True,
         )
+        self._wifi_scan_char = _bleio.Characteristic.add_to_service(
+            self._service,
+            _bleio.UUID(_BASE.format(0x06)),
+            properties=_bleio.Characteristic.WRITE | _bleio.Characteristic.READ | _bleio.Characteristic.NOTIFY,
+            read_perm=_bleio.Attribute.OPEN,
+            write_perm=_bleio.Attribute.OPEN,
+            max_length=244,
+            fixed_length=False,
+        )
 
-        # PacketBuffers queue incoming writes between poll() calls
         self._settings_packets = _bleio.PacketBuffer(
             self._settings_char, buffer_size=8, max_packet_size=244
         )
         self._glucose_packets = _bleio.PacketBuffer(
             self._glucose_char, buffer_size=4, max_packet_size=20
+        )
+        self._wifi_scan_packets = _bleio.PacketBuffer(
+            self._wifi_scan_char, buffer_size=1, max_packet_size=20
         )
 
         self._adv_data = self._build_advertisement(service_uuid)
@@ -204,6 +221,12 @@ class GlucoBitBLE:
             if n == 0:
                 break
             self._handle_glucose_packet(bytes(self._rx_buf[:n]))
+
+        while True:
+            n = self._wifi_scan_packets.readinto(self._rx_buf)
+            if n == 0:
+                break
+            self._handle_wifi_scan_packet(bytes(self._rx_buf[:n]))
 
     # ── Settings transfer ─────────────────────────────────────────
 
@@ -274,6 +297,37 @@ class GlucoBitBLE:
             print("BLE glucose apply error:", e)
             ok = False
         self._ack(_ACK_GLUCOSE, ACK_OK if ok else ACK_FLASH)
+
+    def _handle_wifi_scan_packet(self, pkt):
+        if not pkt or pkt[0] != _SCAN_REQUEST:
+            return
+        if self._on_wifi_scan is None:
+            self._notify_wifi_scan(bytes([_SCAN_ERROR, ACK_FLASH]))
+            return
+        try:
+            payload = json.dumps(self._on_wifi_scan()).encode("utf-8")
+        except Exception as e:
+            print("BLE WiFi scan error:", e)
+            self._notify_wifi_scan(bytes([_SCAN_ERROR, ACK_FLASH]))
+            return
+
+        self._notify_wifi_scan(
+            bytes([_SCAN_BEGIN])
+            + struct.pack("<H", len(payload))
+            + struct.pack("<I", _crc32(payload))
+        )
+        seq = 0
+        for offset in range(0, len(payload), 160):
+            self._notify_wifi_scan(bytes([_SCAN_DATA, seq & 0xFF]) + payload[offset:offset + 160])
+            seq += 1
+            time.sleep(0.02)
+        self._notify_wifi_scan(bytes([_SCAN_COMMIT]))
+
+    def _notify_wifi_scan(self, data):
+        try:
+            self._wifi_scan_char.value = data
+        except Exception as e:
+            print("BLE WiFi scan notify failed:", e)
 
     # ── Notifications ─────────────────────────────────────────────
 

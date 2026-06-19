@@ -81,7 +81,6 @@ struct HeroCardView: View {
                 Image(systemName: reading?.trend.symbolName ?? "arrow.right")
                     .font(.system(size: size * 0.13, weight: .heavy))
                     .foregroundStyle(accent)
-                    .rotationEffect(.degrees(trendRotation))
                     .position(x: center.x, y: center.y - size * 0.18)
                 VStack(spacing: 2) {
                     Text(reading.map { $0.displayValue(mmol: useMmol) } ?? "--")
@@ -130,18 +129,6 @@ struct HeroCardView: View {
         guard let reading else { return -135 }
         let mmol = max(2, min(22, Double(reading.valueMgdl) / 18.0))
         return -135 + ((mmol - 2) / 20) * 270
-    }
-
-    private var trendRotation: Double {
-        guard let trend = reading?.trend else { return 0 }
-        switch trend {
-        case .doubleUp: return -45
-        case .singleUp, .fortyFiveUp: return -22
-        case .flat: return 0
-        case .fortyFiveDown, .singleDown: return 22
-        case .doubleDown: return 45
-        case .none, .notComputable, .rateOutOfRange: return 0
-        }
     }
 
 }

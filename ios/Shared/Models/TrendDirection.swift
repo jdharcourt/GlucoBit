@@ -46,13 +46,13 @@ enum TrendDirection: String, Codable, CaseIterable {
     /// SF Symbol used in the app UI and widget.
     var symbolName: String {
         switch self {
-        case .doubleUp: return "arrow.up.circle.fill"
+        case .doubleUp: return "chevron.up.2"
         case .singleUp: return "arrow.up"
         case .fortyFiveUp: return "arrow.up.right"
         case .flat: return "arrow.right"
         case .fortyFiveDown: return "arrow.down.right"
         case .singleDown: return "arrow.down"
-        case .doubleDown: return "arrow.down.circle.fill"
+        case .doubleDown: return "chevron.down.2"
         case .notComputable, .rateOutOfRange, .none: return "exclamationmark.triangle"
         }
     }

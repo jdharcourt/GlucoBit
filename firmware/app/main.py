@@ -84,6 +84,8 @@ last_ntp_attempt = 0
 
 main_group: displayio.Group | None = None
 time_label: label.Label | None = None
+ui_refs = {}
+ui_signature = None
 
 # BLE companion-app link (initialised after network setup)
 ble_link = None
@@ -484,7 +486,7 @@ red_tilegrid = displayio.TileGrid(red_overlay, pixel_shader=red_palette)
 # Trend arrows file location 
 TREND_ARROWS = {
     'DoubleUp': "/icons/up.bmp", 'FortyFiveUp': "/icons/up-right.bmp", 'SingleUp': "/icons/up.bmp", 'Flat': "/icons/level.bmp", 
-    "FortyFiveDown": "/icons/down-right.bmp", 'SingleDown': "/icons/down.bmp", 'DoubleDown': "/icons/down.bmp", 'NonComputable' : "/icons/alert.bmp"
+    "FortyFiveDown": "/icons/down-right.bmp", 'SingleDown': "/icons/down.bmp", 'DoubleDown': "/icons/down.bmp"
 }
 
 def load_rgb565(path, width, height):
@@ -766,7 +768,9 @@ def add_solid_rect(group, x, y, width, height, color):
     bitmap = displayio.Bitmap(width, height, 1)
     palette = displayio.Palette(1)
     palette[0] = color
-    group.append(displayio.TileGrid(bitmap, pixel_shader=palette, x=x, y=y))
+    rect = displayio.TileGrid(bitmap, pixel_shader=palette, x=x, y=y)
+    group.append(rect)
+    return rect
 
 def draw_trend_arrow(group, trend, center_x, center_y):
     try:
@@ -777,10 +781,12 @@ def draw_trend_arrow(group, trend, center_x, center_y):
                 bitmap=displayio.Bitmap,
                 palette=displayio.Palette
             )
-            arrow_tile = displayio.TileGrid(arrow_bitmap, pixel_shader=arrow_palette)
-            arrow_tile.x = center_x - arrow_bitmap.width // 2
-            arrow_tile.y = center_y - arrow_bitmap.height // 2
-            group.append(arrow_tile)
+            offsets = (-7, 7) if trend in ("DoubleUp", "DoubleDown") else (0,)
+            for offset in offsets:
+                arrow_tile = displayio.TileGrid(arrow_bitmap, pixel_shader=arrow_palette)
+                arrow_tile.x = center_x - arrow_bitmap.width // 2
+                arrow_tile.y = center_y - arrow_bitmap.height // 2 + offset
+                group.append(arrow_tile)
     except Exception as e:
         print(f"Failed to load trend arrow: {e}")
         
@@ -908,43 +914,150 @@ def build_glucose_view_model(value, trend, previous_glucose):
 def draw_border(group, x , y, w, h , radius, color, outline, thick):
     radius = max(0, min(radius, w // 2, h // 2))
     rect = RoundRect(x = x, y= y , width = w, height = h, r = radius, fill=color,
-                           outline= outline,
-                           stroke=thick
-                )
+	                           outline= outline,
+	                           stroke=thick
+	                )
     group.append(rect)
-    
+    return rect
+
 def draw_round_rect(group, x , y, w, h , radius, color):
     radius = max(0, min(radius, w // 2, h // 2))
     rect = RoundRect(x = x, y= y , width = w, height = h, r = radius, fill=color
     )
     group.append(rect)
+    return rect
+
+
+def set_display_color(item, color):
+    try:
+        item.fill = color
+        return
+    except Exception:
+        pass
+    try:
+        item.pixel_shader[0] = color
+    except Exception:
+        pass
+
+
+def set_outline_color(item, color):
+    try:
+        item.outline = color
+    except Exception:
+        pass
+
+
+def add_ui_label(group, key, font, text, color, anchor_point, anchored_position):
+    item = label.Label(font, text=text, color=color, anchor_point=anchor_point, anchored_position=anchored_position)
+    group.append(item)
+    ui_refs["labels"][key] = item
+    return item
+
+
+def add_shape_ref(key, item):
+    ui_refs["shapes"][key] = item
+    return item
+
+
+def replace_trend_arrow(model):
+    parent = ui_refs.get("trend_parent")
+    old_group = ui_refs.get("trend_group")
+    if parent is None:
+        return
+    if old_group is not None:
+        try:
+            parent.remove(old_group)
+        except Exception:
+            pass
+    arrow_group = displayio.Group()
+    ui_refs["trend_group"] = arrow_group
+    parent.append(arrow_group)
+    draw_trend_arrow(arrow_group, model["trend_key"], *ui_refs["trend_position"])
+    ui_refs["trend_key"] = model["trend_key"]
+
+
+def apply_glucose_model(model):
+    labels = ui_refs.get("labels", {})
+    for key, value in (
+        ("name", model["name_text"]),
+        ("status", model["status"]),
+        ("value", model["value_text"]),
+        ("unit", model["unit"]),
+        ("trend_text", model["trend_text"]),
+        ("trend_glyph", model["trend_glyph"]),
+        ("delta", model["delta_text"]),
+    ):
+        item = labels.get(key)
+        if item is not None:
+            item.text = value
+
+    for key, color in (
+        ("status", model["status_color"]),
+        ("value", model["accent_color"]),
+        ("delta", model["delta_color"]),
+    ):
+        item = labels.get(key)
+        if item is not None and key in ui_refs.get("model_colored_labels", ()):
+            item.color = color
+
+    for key in ui_refs.get("accent_shapes", ()):
+        item = ui_refs["shapes"].get(key)
+        if item is not None:
+            set_display_color(item, model["accent_color"])
+
+    for key in ui_refs.get("outline_shapes", ()):
+        item = ui_refs["shapes"].get(key)
+        if item is not None:
+            set_outline_color(item, model["accent_color"])
+
+    for key in ui_refs.get("background_shapes", ()):
+        item = ui_refs["shapes"].get(key)
+        if item is not None:
+            set_display_color(item, model["bg_color"])
+
+    for key in ui_refs.get("light_background_shapes", ()):
+        item = ui_refs["shapes"].get(key)
+        if item is not None:
+            set_display_color(item, model["light_bg"])
+
+    if ui_refs.get("trend_key") != model["trend_key"]:
+        ui_refs["trend_key"] = model["trend_key"]
+        replace_trend_arrow(model)
 
 
 
 
-    
+
 
 def render_ui_theme_1(group, model):
     global time_label
-    draw_round_rect(group, 0, 0, 280, 240, 15, model["light_bg"])
-    add_solid_rect(group, 0, 0, 280, 34, model["bg_color"])
-    draw_round_rect(group, 0, 34, 280, 4, 15, model["accent_color"])
-    draw_round_rect(group, 8, 46, 264, 122, 15, model["bg_color"])
-    draw_round_rect(group, 8, 176, 126, 56, 15, model["bg_color"])
-    draw_round_rect(group, 146, 176, 126, 56, 15, model["bg_color"])
+    add_shape_ref("light_bg", draw_round_rect(group, 0, 0, 280, 240, 15, model["light_bg"]))
+    add_shape_ref("top_bar", add_solid_rect(group, 0, 0, 280, 34, model["bg_color"]))
+    add_shape_ref("accent_bar", draw_round_rect(group, 0, 34, 280, 4, 15, model["accent_color"]))
+    add_shape_ref("value_panel", draw_round_rect(group, 8, 46, 264, 122, 15, model["bg_color"]))
+    add_shape_ref("trend_panel", draw_round_rect(group, 8, 176, 126, 56, 15, model["bg_color"]))
+    add_shape_ref("delta_panel", draw_round_rect(group, 146, 176, 126, 56, 15, model["bg_color"]))
 
-    group.append(label.Label(terminalio.FONT, text=model["name_text"], color=0xDDE7FF, anchor_point=(0.0, 0.0), anchored_position=(10, 9)))
-    time_label = label.Label(terminalio.FONT, text="--:--:--", color=0xEAF1FF, anchor_point=(1.0, 0.0), anchored_position=(270, 9))
-    group.append(time_label)
+    add_ui_label(group, "name", terminalio.FONT, model["name_text"], 0xDDE7FF, (0.0, 0.0), (10, 9))
+    time_label = add_ui_label(group, "time", terminalio.FONT, "--:--:--", 0xEAF1FF, (1.0, 0.0), (270, 9))
 
-    group.append(label.Label(terminalio.FONT, text=model["status"], color=model["status_color"], anchor_point=(0.5, 0.0), anchored_position=(140, 56)))
-    group.append(label.Label(font_80, text=model["value_text"], color=model["accent_color"], anchor_point=(0.5, 0.5), anchored_position=(140, 106)))
-    group.append(label.Label(terminalio.FONT, text=model["unit"], color=0xAFC1E8, anchor_point=(0.5, 0.0), anchored_position=(140, 146)))
+    add_ui_label(group, "status", terminalio.FONT, model["status"], model["status_color"], (0.5, 0.0), (140, 56))
+    add_ui_label(group, "value", font_80, model["value_text"], model["accent_color"], (0.5, 0.5), (140, 106))
+    add_ui_label(group, "unit", terminalio.FONT, model["unit"], 0xAFC1E8, (0.5, 0.0), (140, 146))
     group.append(label.Label(terminalio.FONT, text="TREND", color=0xAFC1E8, anchor_point=(0.0, 0.0), anchored_position=(16, 184)))
-    group.append(label.Label(terminalio.FONT, text=model["trend_text"], color=0xDDE7FF, anchor_point=(0.5, 1.0), anchored_position=(71, 228)))
+    add_ui_label(group, "trend_text", terminalio.FONT, model["trend_text"], 0xDDE7FF, (0.5, 1.0), (71, 228))
     group.append(label.Label(terminalio.FONT, text="DELTA", color=0xAFC1E8, anchor_point=(0.0, 0.0), anchored_position=(154, 184)))
-    group.append(label.Label(font_40, text=model["delta_text"], color=model["delta_color"], anchor_point=(0.5, 0.5), anchored_position=(209, 209)))
-    draw_trend_arrow(group, model["trend_key"], 71, 204)
+    add_ui_label(group, "delta", font_40, model["delta_text"], model["delta_color"], (0.5, 0.5), (209, 209))
+    ui_refs.update({
+        "model_colored_labels": ("status", "value", "delta"),
+        "accent_shapes": ("accent_bar",),
+        "outline_shapes": (),
+        "background_shapes": ("top_bar", "value_panel", "trend_panel", "delta_panel"),
+        "light_background_shapes": ("light_bg",),
+        "trend_parent": group,
+        "trend_position": (71, 204),
+    })
+    replace_trend_arrow(model)
 
 
 def render_ui_theme_2(group, model):
@@ -954,50 +1067,64 @@ def render_ui_theme_2(group, model):
     group.append(bg_group)
     group.append(fg_group)
 
-    add_solid_rect(bg_group, 0, 0, 280, 240, model["light_bg"])
-    draw_round_rect(bg_group, 0, 0, 280, 50, 15, model["accent_color"])
-    draw_round_rect(bg_group, 15, 60, 250, 120, 15, model["bg_color"])
-    draw_round_rect(bg_group, 0, 190, 280, 60, 15, model["bg_color"])
-    draw_round_rect(bg_group, 138, 190, 4, 50, 15, model["accent_color"])
+    add_shape_ref("light_bg", add_solid_rect(bg_group, 0, 0, 280, 240, model["light_bg"]))
+    add_shape_ref("accent_top", draw_round_rect(bg_group, 0, 0, 280, 50, 15, model["accent_color"]))
+    add_shape_ref("value_panel", draw_round_rect(bg_group, 15, 60, 250, 120, 15, model["bg_color"]))
+    add_shape_ref("bottom_panel", draw_round_rect(bg_group, 0, 190, 280, 60, 15, model["bg_color"]))
+    add_shape_ref("accent_divider", draw_round_rect(bg_group, 138, 190, 4, 50, 15, model["accent_color"]))
 
-    fg_group.append(label.Label(terminalio.FONT, text=model["name_text"], color=0x101418, anchor_point=(0.0, 0.0), anchored_position=(10, 14)))
-    time_label = label.Label(terminalio.FONT, text="--:--:--", color=0x101418, anchor_point=(1.0, 0.0), anchored_position=(270, 14))
-    fg_group.append(time_label)
-    fg_group.append(label.Label(terminalio.FONT, text=model["status"], color=0x101418, anchor_point=(0.5, 0.0), anchored_position=(140, 32)))
+    add_ui_label(fg_group, "name", terminalio.FONT, model["name_text"], 0x101418, (0.0, 0.0), (10, 14))
+    time_label = add_ui_label(fg_group, "time", terminalio.FONT, "--:--:--", 0x101418, (1.0, 0.0), (270, 14))
+    add_ui_label(fg_group, "status", terminalio.FONT, model["status"], 0x101418, (0.5, 0.0), (140, 32))
 
-    fg_group.append(label.Label(font_80, text=model["value_text"], color=model["accent_color"], anchor_point=(0.5, 0.5), anchored_position=(140, 110)))
-    fg_group.append(label.Label(font_30, text=model["unit"], color=0xB9C9EA, anchor_point=(0.5, 0.0), anchored_position=(140, 150)))
+    add_ui_label(fg_group, "value", font_80, model["value_text"], model["accent_color"], (0.5, 0.5), (140, 110))
+    add_ui_label(fg_group, "unit", font_30, model["unit"], 0xB9C9EA, (0.5, 0.0), (140, 150))
 
     fg_group.append(label.Label(terminalio.FONT, text="TREND", color=0x8FA2C9, anchor_point=(0.0, 0.0), anchored_position=(14, 198)))
-    fg_group.append(label.Label(terminalio.FONT, text=model["trend_glyph"], color=0xDDE7FF, anchor_point=(0.0, 0.0), anchored_position=(14, 216)))
-    draw_trend_arrow(fg_group, model["trend_key"], 106, 216)
+    add_ui_label(fg_group, "trend_glyph", terminalio.FONT, model["trend_glyph"], 0xDDE7FF, (0.0, 0.0), (14, 216))
 
     fg_group.append(label.Label(terminalio.FONT, text="DELTA", color=0x8FA2C9, anchor_point=(0.0, 0.0), anchored_position=(154, 198)))
-    fg_group.append(label.Label(font_30, text=model["delta_text"], color=model["delta_color"], anchor_point=(0.0, 0.0), anchored_position=(154, 212)))
+    add_ui_label(fg_group, "delta", font_30, model["delta_text"], model["delta_color"], (0.0, 0.0), (154, 212))
+    ui_refs.update({
+        "model_colored_labels": ("value", "delta"),
+        "accent_shapes": ("accent_top", "accent_divider"),
+        "outline_shapes": (),
+        "background_shapes": ("value_panel", "bottom_panel"),
+        "light_background_shapes": ("light_bg",),
+        "trend_parent": fg_group,
+        "trend_position": (106, 216),
+    })
+    replace_trend_arrow(model)
 
 
 def render_ui_theme_3(group, model):
     global time_label
-    draw_border(group, 0, 0, 280, 240, 50, model["bg_color"], model["accent_color"], 8)
+    add_shape_ref("border", draw_border(group, 0, 0, 280, 240, 50, model["bg_color"], model["accent_color"], 8))
 
-    time_label = label.Label(terminalio.FONT, text="--:--:--", color=0xC6CAD4, anchor_point=(0.0, 0.0), anchored_position=(30, 16))
-    group.append(time_label)
-    group.append(label.Label(terminalio.FONT, text=model["name_text"], color=0x9EA4B5, anchor_point=(1.0, 0.0), anchored_position=(2, 16)))
-    group.append(label.Label(terminalio.FONT, text=model["status"], color=model["status_color"], anchor_point=(0.5, 0.0), anchored_position=(140, 44)))
+    time_label = add_ui_label(group, "time", terminalio.FONT, "--:--:--", 0xC6CAD4, (0.0, 0.0), (30, 16))
+    add_ui_label(group, "name", terminalio.FONT, model["name_text"], 0x9EA4B5, (1.0, 0.0), (2, 16))
+    add_ui_label(group, "status", terminalio.FONT, model["status"], model["status_color"], (0.5, 0.0), (140, 44))
 
-    group.append(label.Label(font_80, text=model["value_text"], color=0xF3F5FA, anchor_point=(0.5, 0.5), anchored_position=(140, 110)))
-    group.append(label.Label(terminalio.FONT, text=model["unit"], color=0xA4AABC, anchor_point=(0.5, 0.0), anchored_position=(140, 148)))
+    add_ui_label(group, "value", font_80, model["value_text"], 0xF3F5FA, (0.5, 0.5), (140, 110))
+    add_ui_label(group, "unit", terminalio.FONT, model["unit"], 0xA4AABC, (0.5, 0.0), (140, 148))
 
-    group.append(label.Label(font_30, text=model["delta_text"], color=model["delta_color"], anchor_point=(0.0, 1.0), anchored_position=(25, 224)))
-    draw_trend_arrow(group, model["trend_key"], 140, 190)
+    add_ui_label(group, "delta", font_30, model["delta_text"], model["delta_color"], (0.0, 1.0), (25, 224))
+    ui_refs.update({
+        "model_colored_labels": ("status", "delta"),
+        "accent_shapes": (),
+        "outline_shapes": ("border",),
+        "background_shapes": ("border",),
+        "light_background_shapes": (),
+        "trend_parent": group,
+        "trend_position": (140, 190),
+    })
+    replace_trend_arrow(model)
 
 
 def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
-    global last_reading, main_group
+    global last_reading, main_group, ui_refs, ui_signature
 
     gc.collect()
-    main_group = displayio.Group()
-    display.root_group = main_group
 
     new_reading = False
     if latest_reading_time != last_reading:
@@ -1020,12 +1147,20 @@ def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
     if current_theme not in (1, 2, 3):
         current_theme = 1
 
-    if current_theme == 2:
-        render_ui_theme_2(main_group, model)
-    elif current_theme == 3:
-        render_ui_theme_3(main_group, model)
+    signature = (current_theme,)
+    if display.root_group is main_group and ui_refs and ui_signature == signature:
+        apply_glucose_model(model)
     else:
-        render_ui_theme_1(main_group, model)
+        main_group = displayio.Group()
+        ui_refs = {"labels": {}, "shapes": {}}
+        ui_signature = signature
+        display.root_group = main_group
+        if current_theme == 2:
+            render_ui_theme_2(main_group, model)
+        elif current_theme == 3:
+            render_ui_theme_3(main_group, model)
+        else:
+            render_ui_theme_1(main_group, model)
 
     print(f"Display updated: {model['display_value']} {model['unit']} | Trend: {trend} | Status: {model['status']} | UI: {current_theme}")
 
@@ -1713,34 +1848,7 @@ def start_webserver(pool, https_session, ap_mode=False):
     
     @server.route("/scan-wifi", methods=["GET"])
     def scan_wifi(request: Request):
-        networks = []
-        try:
-            found = wifi.radio.start_scanning_networks()
-            for net in found:
-                try:
-                    ssid = net.ssid
-                    rssi = net.rssi
-                    if ssid:  # filter out hidden networks
-                        networks.append({"ssid": ssid, "rssi": rssi})
-                except Exception:
-                    pass
-        except Exception as e:
-            print("WiFi scan error:", e)
-        finally:
-            try:
-                wifi.radio.stop_scanning_networks()
-            except Exception:
-                pass
-
-        # Sort by signal strength (strongest first), deduplicate SSIDs
-        seen = set()
-        unique = []
-        for n in sorted(networks, key=lambda x: x["rssi"], reverse=True):
-            if n["ssid"] not in seen:
-                seen.add(n["ssid"])
-                unique.append(n)
-
-        return Response(request, json.dumps(unique), content_type="application/json")
+        return Response(request, json.dumps(scan_wifi_networks()), content_type="application/json")
     # ============================================================
     # START SERVER
     # ============================================================
@@ -1861,6 +1969,37 @@ def _ble_on_glucose(value, trend, ts, prev_value, prev_ts, current_ts=None):
     return True
 
 
+def scan_wifi_networks(limit=20):
+    networks = []
+    try:
+        found = wifi.radio.start_scanning_networks()
+        for net in found:
+            try:
+                ssid = net.ssid
+                rssi = net.rssi
+                if ssid:
+                    networks.append({"ssid": ssid, "rssi": rssi})
+            except Exception:
+                pass
+    except Exception as e:
+        print("WiFi scan error:", e)
+    finally:
+        try:
+            wifi.radio.stop_scanning_networks()
+        except Exception:
+            pass
+
+    seen = set()
+    unique = []
+    for n in sorted(networks, key=lambda x: x["rssi"], reverse=True):
+        if n["ssid"] not in seen:
+            seen.add(n["ssid"])
+            unique.append(n)
+            if len(unique) >= limit:
+                break
+    return unique
+
+
 def _ble_get_status():
     flags = 0
     if wifi.radio.connected:
@@ -1892,7 +2031,7 @@ if settings.get("BLE_ENABLED", True):
         from app.ble import GlucoBitBLE
         gc.collect()
         _mem_before_ble = gc.mem_free()
-        ble_link = GlucoBitBLE(_ble_on_settings, _ble_on_glucose, _ble_get_status)
+        ble_link = GlucoBitBLE(_ble_on_settings, _ble_on_glucose, _ble_get_status, scan_wifi_networks)
         gc.collect()
         print(f"BLE enabled (cost {_mem_before_ble - gc.mem_free()} bytes, free {gc.mem_free()})")
     except Exception as e:

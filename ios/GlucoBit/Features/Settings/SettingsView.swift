@@ -10,16 +10,18 @@ struct SettingsView: View {
     @State private var showSetupWizard = false
 
     var body: some View {
+        @Bindable var settings = settings
+
         Form {
             Section("Units") {
-                Picker("Glucose unit", selection: Bindable(settings).useMmol) {
+                Picker("Glucose unit", selection: $settings.useMmol) {
                     Text("mmol/L").tag(true)
                     Text("mg/dL").tag(false)
                 }
             }
 
             Section("Alerts") {
-                Toggle("Glucose notifications", isOn: Bindable(settings).notificationsEnabled)
+                Toggle("Glucose notifications", isOn: $settings.notificationsEnabled)
                     .onChange(of: settings.notificationsEnabled) { _, enabled in
                         if enabled {
                             Task {
@@ -34,7 +36,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Save to Apple Health", isOn: Bindable(settings).healthKitEnabled)
+                Toggle("Save to Apple Health", isOn: $settings.healthKitEnabled)
                     .onChange(of: settings.healthKitEnabled) { _, enabled in
                         if enabled {
                             Task {
