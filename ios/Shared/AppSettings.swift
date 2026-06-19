@@ -25,6 +25,12 @@ final class AppSettings {
     var alertHighMgdl: Int {
         didSet { Self.defaults.set(alertHighMgdl, forKey: "ALERT_HIGH_MGDL") }
     }
+    var noDataAlarmEnabled: Bool {
+        didSet { Self.defaults.set(noDataAlarmEnabled, forKey: "NO_DATA_ALARM_ENABLED") }
+    }
+    var noDataAlarmMinutes: Int {
+        didSet { Self.defaults.set(noDataAlarmMinutes, forKey: "NO_DATA_ALARM_MINUTES") }
+    }
     var notificationsEnabled: Bool {
         didSet { Self.defaults.set(notificationsEnabled, forKey: "NOTIFICATIONS_ENABLED") }
     }
@@ -46,6 +52,8 @@ final class AppSettings {
         deviceUITheme = d.object(forKey: "UI_THEME") as? Int ?? 1
         alertLowMgdl = d.object(forKey: "ALERT_LOW_MGDL") as? Int ?? 70
         alertHighMgdl = d.object(forKey: "ALERT_HIGH_MGDL") as? Int ?? 180
+        noDataAlarmEnabled = d.object(forKey: "NO_DATA_ALARM_ENABLED") as? Bool ?? true
+        noDataAlarmMinutes = d.object(forKey: "NO_DATA_ALARM_MINUTES") as? Int ?? 15
         notificationsEnabled = d.object(forKey: "NOTIFICATIONS_ENABLED") as? Bool ?? false
         healthKitEnabled = d.object(forKey: "HEALTHKIT_ENABLED") as? Bool ?? false
         deviceConfigured = d.bool(forKey: "DEVICE_CONFIGURED")

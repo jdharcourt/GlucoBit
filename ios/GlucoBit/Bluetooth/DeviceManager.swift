@@ -34,6 +34,7 @@ protocol DeviceManaging: AnyObject {
     func writeSettings(_ data: Data) async throws
     func writeGlucose(_ data: Data) async throws
     func scanWiFiNetworks() async throws -> [WiFiNetwork]
+    func runDeveloperCommand(_ command: String) async throws -> String
 }
 
 enum DeviceError: LocalizedError {
@@ -74,8 +75,10 @@ final class DeviceManager: NSObject, DeviceManaging {
     private var statusChar: CBCharacteristic?
     private var controlChar: CBCharacteristic?
     private var wifiScanChar: CBCharacteristic?
+    private var developerCommandChar: CBCharacteristic?
     private var writeContinuation: CheckedContinuation<Void, Error>?
     private var wifiScanContinuation: CheckedContinuation<[WiFiNetwork], Error>?
+    private var developerCommandContinuation: CheckedContinuation<String, Error>?
     private var wifiScanExpectedLength = 0
     private var wifiScanCRC: UInt32 = 0
     private var wifiScanBuffer = Data()
@@ -175,6 +178,27 @@ final class DeviceManager: NSObject, DeviceManaging {
         }
     }
 
+    func runDeveloperCommand(_ command: String) async throws -> String {
+        guard let peripheral, connectionState == .connected else { throw DeviceError.notConnected }
+        guard let developerCommandChar else { throw DeviceError.characteristicMissing }
+        guard developerCommandContinuation == nil else { throw DeviceError.writeFailed("Developer command already running.") }
+        guard let data = command.data(using: .utf8), data.count <= 80 else {
+            throw DeviceError.writeFailed("Developer command is too long.")
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            developerCommandContinuation = continuation
+            peripheral.writeValue(data, for: developerCommandChar, type: .withResponse)
+            Task {
+                try? await Task.sleep(for: .seconds(8))
+                await MainActor.run {
+                    if self.developerCommandContinuation != nil {
+                        self.finishDeveloperCommand(.failure(DeviceError.ackTimeout))
+                    }
+                }
+            }
+        }
+    }
+
     private func write(_ data: Data, to characteristic: CBCharacteristic?) async throws {
         guard let peripheral, connectionState == .connected else { throw DeviceError.notConnected }
         guard let characteristic else { throw DeviceError.characteristicMissing }
@@ -230,6 +254,17 @@ final class DeviceManager: NSObject, DeviceManaging {
         switch result {
         case .success(let networks):
             continuation.resume(returning: networks)
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+
+    private func finishDeveloperCommand(_ result: Result<String, Error>) {
+        guard let continuation = developerCommandContinuation else { return }
+        developerCommandContinuation = nil
+        switch result {
+        case .success(let message):
+            continuation.resume(returning: message)
         case .failure(let error):
             continuation.resume(throwing: error)
         }
@@ -317,9 +352,11 @@ extension DeviceManager: CBCentralManagerDelegate {
             self.statusChar = nil
             self.controlChar = nil
             self.wifiScanChar = nil
+            self.developerCommandChar = nil
             self.writeContinuation?.resume(throwing: DeviceError.notConnected)
             self.writeContinuation = nil
             self.finishWiFiScan(.failure(DeviceError.notConnected))
+            self.finishDeveloperCommand(.failure(DeviceError.notConnected))
             // Keep a pending connect outstanding so we reattach the moment
             // the device advertises again (works while backgrounded).
             self.reconnectIfPaired()
@@ -332,7 +369,7 @@ extension DeviceManager: CBPeripheralDelegate {
         guard let service = peripheral.services?.first(where: { $0.uuid == GlucoBitGATT.service }) else { return }
         peripheral.discoverCharacteristics(
             [GlucoBitGATT.settingsTransfer, GlucoBitGATT.controlAck,
-             GlucoBitGATT.glucosePush, GlucoBitGATT.deviceStatus, GlucoBitGATT.wifiScan],
+             GlucoBitGATT.glucosePush, GlucoBitGATT.deviceStatus, GlucoBitGATT.wifiScan, GlucoBitGATT.developerCommand],
             for: service
         )
     }
@@ -357,6 +394,9 @@ extension DeviceManager: CBPeripheralDelegate {
                     peripheral.setNotifyValue(true, for: char)
                 case GlucoBitGATT.wifiScan:
                     self.wifiScanChar = char
+                    peripheral.setNotifyValue(true, for: char)
+                case GlucoBitGATT.developerCommand:
+                    self.developerCommandChar = char
                     peripheral.setNotifyValue(true, for: char)
                 default:
                     break
@@ -387,6 +427,8 @@ extension DeviceManager: CBPeripheralDelegate {
                 }
             case GlucoBitGATT.wifiScan:
                 self.handleWiFiScanPacket(data)
+            case GlucoBitGATT.developerCommand:
+                self.finishDeveloperCommand(.success(String(decoding: data, as: UTF8.self)))
             default:
                 break
             }
@@ -399,6 +441,12 @@ extension DeviceManager: CBPeripheralDelegate {
         error: Error?
     ) {
         Task { @MainActor in
+            if characteristic.uuid == GlucoBitGATT.developerCommand {
+                if let error {
+                    self.finishDeveloperCommand(.failure(DeviceError.writeFailed(error.localizedDescription)))
+                }
+                return
+            }
             if let error {
                 self.writeContinuation?.resume(throwing: DeviceError.writeFailed(error.localizedDescription))
             } else {
@@ -474,5 +522,10 @@ final class MockDeviceManager: DeviceManaging {
             WiFiNetwork(ssid: "Office", rssi: -55),
             WiFiNetwork(ssid: "Guest", rssi: -68),
         ]
+    }
+
+    func runDeveloperCommand(_ command: String) async throws -> String {
+        try? await Task.sleep(for: .milliseconds(300))
+        return "Mock \(command) OK"
     }
 }

@@ -9,8 +9,10 @@ struct DeviceSettingsView: View {
     @State private var theme: Int
     @State private var backgroundColor: Color
     @State private var useMmol: Bool
-    @State private var alertLowMgdl: Int
-    @State private var alertHighMgdl: Int
+    @State private var alertLowMgdl: Double
+    @State private var alertHighMgdl: Double
+    @State private var noDataAlarmEnabled: Bool
+    @State private var noDataAlarmMinutes: Double
     @State private var sending = false
     @State private var error: String?
 
@@ -21,8 +23,10 @@ struct DeviceSettingsView: View {
         _theme = State(initialValue: settings.deviceUITheme)
         _backgroundColor = State(initialValue: DeviceTheme.backgroundColor(hexString: settings.backgroundColorHex))
         _useMmol = State(initialValue: settings.useMmol)
-        _alertLowMgdl = State(initialValue: settings.alertLowMgdl)
-        _alertHighMgdl = State(initialValue: settings.alertHighMgdl)
+        _alertLowMgdl = State(initialValue: Double(settings.alertLowMgdl))
+        _alertHighMgdl = State(initialValue: Double(settings.alertHighMgdl))
+        _noDataAlarmEnabled = State(initialValue: settings.noDataAlarmEnabled)
+        _noDataAlarmMinutes = State(initialValue: Double(settings.noDataAlarmMinutes))
     }
 
     var body: some View {
@@ -42,8 +46,18 @@ struct DeviceSettingsView: View {
             }
 
             Section("Alerts") {
-                Stepper("Low alert: \(thresholdText(alertLowMgdl))", value: $alertLowMgdl, in: 55...120, step: 5)
-                Stepper("High alert: \(thresholdText(alertHighMgdl))", value: $alertHighMgdl, in: 120...300, step: 5)
+                sliderRow(title: "Low alert", value: thresholdText(Int(alertLowMgdl))) {
+                    Slider(value: $alertLowMgdl, in: 55...120, step: 5)
+                }
+                sliderRow(title: "High alert", value: thresholdText(Int(alertHighMgdl))) {
+                    Slider(value: $alertHighMgdl, in: 120...300, step: 5)
+                }
+                Toggle("No data alarm", isOn: $noDataAlarmEnabled)
+                sliderRow(title: "No data after", value: "\(Int(noDataAlarmMinutes)) min") {
+                    Slider(value: $noDataAlarmMinutes, in: 5...60, step: 5)
+                        .disabled(!noDataAlarmEnabled)
+                }
+                .foregroundStyle(noDataAlarmEnabled ? .primary : .secondary)
             }
 
             Section("Connection") {
@@ -88,6 +102,18 @@ struct DeviceSettingsView: View {
         }
     }
 
+    private func sliderRow<Content: View>(title: String, value: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value)
+                    .foregroundStyle(.secondary)
+            }
+            content()
+        }
+    }
+
     private func thresholdText(_ mgdl: Int) -> String {
         if useMmol {
             return String(format: "%.1f mmol/L", Double(mgdl) / 18.0)
@@ -103,8 +129,10 @@ struct DeviceSettingsView: View {
         settings.deviceUITheme = theme
         settings.backgroundColorHex = bgHex
         settings.useMmol = useMmol
-        settings.alertLowMgdl = alertLowMgdl
-        settings.alertHighMgdl = alertHighMgdl
+        settings.alertLowMgdl = Int(alertLowMgdl)
+        settings.alertHighMgdl = Int(alertHighMgdl)
+        settings.noDataAlarmEnabled = noDataAlarmEnabled
+        settings.noDataAlarmMinutes = Int(noDataAlarmMinutes)
         guard device.connectionState == .connected else {
             sending = false
             dismiss()
@@ -117,8 +145,10 @@ struct DeviceSettingsView: View {
                     .uiTheme: theme,
                     .backgroundColor: bgHex,
                     .mmol: useMmol,
-                    .alertLowMgdl: alertLowMgdl,
-                    .alertHighMgdl: alertHighMgdl,
+                    .alertLowMgdl: Int(alertLowMgdl),
+                    .alertHighMgdl: Int(alertHighMgdl),
+                    .noDataAlarmEnabled: noDataAlarmEnabled,
+                    .noDataAlarmMinutes: Int(noDataAlarmMinutes),
                 ])
                 sending = false
                 dismiss()

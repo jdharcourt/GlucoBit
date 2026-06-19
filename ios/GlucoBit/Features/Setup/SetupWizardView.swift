@@ -71,6 +71,8 @@ struct SetupWizardView: View {
             .mmol: settings.useMmol,
             .alertLowMgdl: settings.alertLowMgdl,
             .alertHighMgdl: settings.alertHighMgdl,
+            .noDataAlarmEnabled: settings.noDataAlarmEnabled,
+            .noDataAlarmMinutes: settings.noDataAlarmMinutes,
             .setupMode: false,
         ]
     }

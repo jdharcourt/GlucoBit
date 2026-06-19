@@ -78,7 +78,7 @@ class GlucoBitBLE:
     queue inside _bleio PacketBuffers, so nothing is lost while the loop is
     busy (including during the blocking alarm loop)."""
 
-    def __init__(self, on_settings, on_glucose, get_status, on_wifi_scan=None):
+    def __init__(self, on_settings, on_glucose, get_status, on_wifi_scan=None, on_developer_command=None):
         """
         on_settings(dict) -> bool   apply merged settings; True on success
         on_glucose(value_mgdl, trend_str, ts, prev_value, prev_ts) -> bool
@@ -91,6 +91,7 @@ class GlucoBitBLE:
         self._on_glucose = on_glucose
         self._get_status = get_status
         self._on_wifi_scan = on_wifi_scan
+        self._on_developer_command = on_developer_command
 
         self._rx_buf = bytearray(244)
         self._settings_buf = None
@@ -151,6 +152,15 @@ class GlucoBitBLE:
             max_length=244,
             fixed_length=False,
         )
+        self._developer_char = _bleio.Characteristic.add_to_service(
+            self._service,
+            _bleio.UUID(_BASE.format(0x07)),
+            properties=_bleio.Characteristic.WRITE | _bleio.Characteristic.READ | _bleio.Characteristic.NOTIFY,
+            read_perm=_bleio.Attribute.OPEN,
+            write_perm=_bleio.Attribute.OPEN,
+            max_length=244,
+            fixed_length=False,
+        )
 
         self._settings_packets = _bleio.PacketBuffer(
             self._settings_char, buffer_size=8, max_packet_size=244
@@ -160,6 +170,9 @@ class GlucoBitBLE:
         )
         self._wifi_scan_packets = _bleio.PacketBuffer(
             self._wifi_scan_char, buffer_size=1, max_packet_size=20
+        )
+        self._developer_packets = _bleio.PacketBuffer(
+            self._developer_char, buffer_size=2, max_packet_size=80
         )
 
         self._adv_data = self._build_advertisement(service_uuid)
@@ -227,6 +240,12 @@ class GlucoBitBLE:
             if n == 0:
                 break
             self._handle_wifi_scan_packet(bytes(self._rx_buf[:n]))
+
+        while True:
+            n = self._developer_packets.readinto(self._rx_buf)
+            if n == 0:
+                break
+            self._handle_developer_packet(bytes(self._rx_buf[:n]))
 
     # ── Settings transfer ─────────────────────────────────────────
 
@@ -328,6 +347,26 @@ class GlucoBitBLE:
             self._wifi_scan_char.value = data
         except Exception as e:
             print("BLE WiFi scan notify failed:", e)
+
+    def _handle_developer_packet(self, pkt):
+        if self._on_developer_command is None:
+            self._notify_developer("Developer commands unavailable")
+            return
+        try:
+            command = pkt.decode("utf-8").strip()
+            result = self._on_developer_command(command)
+            if not isinstance(result, str):
+                result = json.dumps(result)
+            self._notify_developer(result)
+        except Exception as e:
+            print("BLE developer command error:", e)
+            self._notify_developer("Command failed")
+
+    def _notify_developer(self, message):
+        try:
+            self._developer_char.value = str(message)[:240].encode("utf-8")
+        except Exception as e:
+            print("BLE developer notify failed:", e)
 
     # ── Notifications ─────────────────────────────────────────────
 

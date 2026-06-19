@@ -67,6 +67,12 @@ struct SettingsView: View {
                     DexcomAccountView(sync: sync)
                 }
             }
+
+            Section("Developer") {
+                NavigationLink("Developer portal") {
+                    DeveloperPortalView(device: device, sync: sync)
+                }
+            }
         }
         .navigationTitle("Settings")
         .scrollContentBackground(.hidden)

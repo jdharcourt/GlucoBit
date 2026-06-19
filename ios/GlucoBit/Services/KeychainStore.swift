@@ -11,6 +11,7 @@ enum KeychainStore {
         case dexcomServer = "dexcom-server"
         case deviceWifiSSID = "device-wifi-ssid"
         case deviceWifiPassword = "device-wifi-password"
+        case developerPortalToken = "developer-portal-token"
     }
 
     static func set(_ value: String, for key: Key) {

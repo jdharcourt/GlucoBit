@@ -66,6 +66,8 @@ last_low = None
 last_reading = None
 last_triggered_value = None
 last_glucose_cache = None  # (value, trend, latest_reading_time, prev_value)
+no_data_warning_active = False
+pending_developer_alarm = False
 next_glucose_fetch_time = 0
 
 LOW = 2
@@ -321,7 +323,9 @@ default_settings = {
     "UI_THEME": 1,
     "BACKGROUND_COLOR": "#070B18",
     "ALERT_LOW_MGDL": 70,
-    "ALERT_HIGH_MGDL": 180
+    "ALERT_HIGH_MGDL": 180,
+    "NO_DATA_ALARM_ENABLED": True,
+    "NO_DATA_ALARM_MINUTES": 15
 }
 
 
@@ -346,7 +350,7 @@ def url_decode(text):
     return result.replace('+', ' ')
 
 
-def normalize_alert_thresholds(config):
+def normalize_alert_settings(config):
     try:
         low = int(config.get("ALERT_LOW_MGDL", 70))
     except Exception:
@@ -362,6 +366,12 @@ def normalize_alert_thresholds(config):
         high = 180
     config["ALERT_LOW_MGDL"] = low
     config["ALERT_HIGH_MGDL"] = high
+    config["NO_DATA_ALARM_ENABLED"] = bool(config.get("NO_DATA_ALARM_ENABLED", True))
+    try:
+        minutes = int(config.get("NO_DATA_ALARM_MINUTES", 15))
+    except Exception:
+        minutes = 15
+    config["NO_DATA_ALARM_MINUTES"] = max(5, min(minutes, 60))
 
 
 boot_msg = label.Label(
@@ -393,7 +403,7 @@ nvm_settings = load_settings_nvm()
 if nvm_settings:
     settings.update(nvm_settings)
     print("Loaded settings from NVM.")
-normalize_alert_thresholds(settings)
+normalize_alert_settings(settings)
 
 # Extract settings to variables
 WIFI_SSID = settings["WIFI_SSID"]
@@ -406,6 +416,8 @@ MMOL = settings["MMOL"]
 BACKGROUND_COLOR = settings.get("BACKGROUND_COLOR", "#070B18")
 ALERT_LOW_MGDL = settings["ALERT_LOW_MGDL"]
 ALERT_HIGH_MGDL = settings["ALERT_HIGH_MGDL"]
+NO_DATA_ALARM_ENABLED = settings["NO_DATA_ALARM_ENABLED"]
+NO_DATA_ALARM_MINUTES = settings["NO_DATA_ALARM_MINUTES"]
 try:
     UI_THEME = int(settings.get("UI_THEME", 1))
 except Exception:
@@ -436,7 +448,7 @@ def apply_new_settings(updates):
     old_password = settings.get("WIFI_PASSWORD")
 
     settings.update(updates)
-    normalize_alert_thresholds(settings)
+    normalize_alert_settings(settings)
 
     try:
         theme_value = int(settings.get("UI_THEME", 1))
@@ -737,6 +749,32 @@ def play_alarm(current_glucose):
         cleanup_touch()
         init_sleep_touch()
         alarm_active = False
+
+
+def no_data_age_seconds():
+    if is_setup_needed():
+        return None
+    if last_reading_monotonic is None:
+        return int(time.monotonic())
+    return int(time.monotonic() - last_reading_monotonic)
+
+
+def no_data_limit_seconds():
+    return int(NO_DATA_ALARM_MINUTES) * 60
+
+
+def check_no_data_alarm():
+    global last_triggered_value
+    age = no_data_age_seconds()
+    if age is None or age < no_data_limit_seconds():
+        return False
+    if not no_data_warning_active:
+        return True
+    if NO_DATA_ALARM_ENABLED and not alarm_active and last_triggered_value != "NO_DATA":
+        print("NO DATA TIMEOUT — STARTING PERSISTENT ALARM")
+        last_triggered_value = "NO_DATA"
+        play_alarm(None)
+    return True
 
 
 def check_alarm(value, mmol):
@@ -1122,9 +1160,11 @@ def render_ui_theme_3(group, model):
 
 
 def show_glucose(value, trend, latest_reading_time, previous_glucose=None):
-    global last_reading, main_group, ui_refs, ui_signature
+    global last_reading, main_group, ui_refs, ui_signature, no_data_warning_active
 
     gc.collect()
+    if value is not None:
+        no_data_warning_active = False
 
     new_reading = False
     if latest_reading_time != last_reading:
@@ -1358,6 +1398,7 @@ def start_webserver(pool, https_session, ap_mode=False):
 
                 input[type="text"],
                 input[type="password"],
+                input[type="number"],
                 input[type="color"],
                 select {{
                     width: 100%;
@@ -1371,6 +1412,7 @@ def start_webserver(pool, https_session, ap_mode=False):
 
                 input[type="text"]:focus,
                 input[type="password"]:focus,
+                input[type="number"]:focus,
                 input[type="color"]:focus,
                 select:focus {{
                     background: white;
@@ -1654,6 +1696,17 @@ def start_webserver(pool, https_session, ap_mode=False):
                                 <label for="ALERT_HIGH_MGDL">High Alert (mg/dL)</label>
                                 <input type="number" id="ALERT_HIGH_MGDL" name="ALERT_HIGH_MGDL" min="120" max="300" step="5" value="{ALERT_HIGH_MGDL}">
                             </div>
+                            <div class="toggle-group">
+                                <span class="toggle-label">No data alarm</span>
+                                <label class="toggle">
+                                    <input type="checkbox" name="NO_DATA_ALARM_ENABLED" {"checked" if NO_DATA_ALARM_ENABLED else ""}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label for="NO_DATA_ALARM_MINUTES">No Data After (minutes)</label>
+                                <input type="number" id="NO_DATA_ALARM_MINUTES" name="NO_DATA_ALARM_MINUTES" min="5" max="60" step="5" value="{NO_DATA_ALARM_MINUTES}">
+                            </div>
                         </div>
                         
                         <div class="section">
@@ -1784,7 +1837,7 @@ def start_webserver(pool, https_session, ap_mode=False):
     # ============================================================
     @server.route("/save", methods=["POST"])
     def save(request: Request):
-        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST, ALERT_LOW_MGDL, ALERT_HIGH_MGDL
+        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST, ALERT_LOW_MGDL, ALERT_HIGH_MGDL, NO_DATA_ALARM_ENABLED, NO_DATA_ALARM_MINUTES
         global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
 
         form_data = request.form_data
@@ -1808,6 +1861,8 @@ def start_webserver(pool, https_session, ap_mode=False):
             "UI_THEME": theme_value,
             "ALERT_LOW_MGDL": form_data.get("ALERT_LOW_MGDL", ALERT_LOW_MGDL),
             "ALERT_HIGH_MGDL": form_data.get("ALERT_HIGH_MGDL", ALERT_HIGH_MGDL),
+            "NO_DATA_ALARM_ENABLED": "NO_DATA_ALARM_ENABLED" in form_data,
+            "NO_DATA_ALARM_MINUTES": form_data.get("NO_DATA_ALARM_MINUTES", NO_DATA_ALARM_MINUTES),
             "SETUP_MODE": False
         }
         
@@ -2000,6 +2055,45 @@ def scan_wifi_networks(limit=20):
     return unique
 
 
+def run_developer_command(command):
+    global pending_developer_alarm
+    command = command.strip().lower()
+    if command == "status":
+        age = no_data_age_seconds()
+        return {
+            "wifi": bool(wifi.radio.connected),
+            "ip": str(wifi.radio.ipv4_address) if wifi.radio.connected else None,
+            "age": age,
+            "alarm": bool(alarm_active),
+            "version": get_version(),
+        }
+    if command == "wifi":
+        return {
+            "connected": bool(wifi.radio.connected),
+            "ip": str(wifi.radio.ipv4_address) if wifi.radio.connected else None,
+            "networks": len(scan_wifi_networks(limit=10)),
+        }
+    if command == "bluetooth":
+        return {"connected": bool(ble_link and ble_link.connected)}
+    if command == "led":
+        for color in ((255, 0, 0), (0, 255, 0), (0, 0, 255)):
+            pixels.fill(color)
+            pixels.show()
+            time.sleep(0.2)
+        pixels.fill((0, 0, 0))
+        pixels.show()
+        return "LED test complete"
+    if command == "screen":
+        show_glucose(110, "Flat", int(time.time()), 105)
+        return "Screen test complete"
+    if command == "alarm":
+        pending_developer_alarm = True
+        return "Alarm test queued"
+    if command == "wifi_scan":
+        return scan_wifi_networks(limit=10)
+    return "Unknown command"
+
+
 def _ble_get_status():
     flags = 0
     if wifi.radio.connected:
@@ -2031,7 +2125,7 @@ if settings.get("BLE_ENABLED", True):
         from app.ble import GlucoBitBLE
         gc.collect()
         _mem_before_ble = gc.mem_free()
-        ble_link = GlucoBitBLE(_ble_on_settings, _ble_on_glucose, _ble_get_status, scan_wifi_networks)
+        ble_link = GlucoBitBLE(_ble_on_settings, _ble_on_glucose, _ble_get_status, scan_wifi_networks, run_developer_command)
         gc.collect()
         print(f"BLE enabled (cost {_mem_before_ble - gc.mem_free()} bytes, free {gc.mem_free()})")
     except Exception as e:
@@ -2136,8 +2230,6 @@ while True:
             if is_setup_needed():
                 ip = str(wifi.radio.ipv4_address or wifi.radio.ipv4_address_ap or "192.168.4.1")
                 show_setup_screen(ip)
-            else:
-                show_glucose(None, None, None)
             next_glucose_fetch_time = time.monotonic() + glucose_error_retry_interval
 
     # Reading relayed from the companion app over BLE (typically while WiFi
@@ -2152,6 +2244,10 @@ while True:
             last_reading_epoch = ts
             last_reading_monotonic = time.monotonic()
             next_glucose_fetch_time = next_glucose_poll_time(ts)
+
+    if check_no_data_alarm() and not no_data_warning_active:
+        no_data_warning_active = True
+        show_glucose(None, None, None)
 
     if wifi.radio.connected and (time.monotonic() - last_update_check >= version_check or first_check):
         last_update_check = time.monotonic()
@@ -2181,6 +2277,10 @@ while True:
             ble_link.notify_status()
         except Exception as e:
             print("BLE poll error:", e)
+
+    if pending_developer_alarm:
+        pending_developer_alarm = False
+        play_alarm(None)
 
     if touch and touch.value: # check for touch
         print("Touch Detected")
