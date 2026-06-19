@@ -73,6 +73,8 @@ struct SetupWizardView: View {
             .alertHighMgdl: settings.alertHighMgdl,
             .noDataAlarmEnabled: settings.noDataAlarmEnabled,
             .noDataAlarmMinutes: settings.noDataAlarmMinutes,
+            .timezoneAutomatic: settings.timezoneAutomatic,
+            .timezoneOffsetMinutes: settings.timezoneAutomatic ? AppSettings.currentTimezoneOffsetMinutes : settings.timezoneOffsetMinutes,
             .setupMode: false,
         ]
     }

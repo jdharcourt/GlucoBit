@@ -31,6 +31,12 @@ final class AppSettings {
     var noDataAlarmMinutes: Int {
         didSet { Self.defaults.set(noDataAlarmMinutes, forKey: "NO_DATA_ALARM_MINUTES") }
     }
+    var timezoneAutomatic: Bool {
+        didSet { Self.defaults.set(timezoneAutomatic, forKey: "TIMEZONE_AUTOMATIC") }
+    }
+    var timezoneOffsetMinutes: Int {
+        didSet { Self.defaults.set(timezoneOffsetMinutes, forKey: "TIMEZONE_OFFSET_MINUTES") }
+    }
     var notificationsEnabled: Bool {
         didSet { Self.defaults.set(notificationsEnabled, forKey: "NOTIFICATIONS_ENABLED") }
     }
@@ -54,6 +60,8 @@ final class AppSettings {
         alertHighMgdl = d.object(forKey: "ALERT_HIGH_MGDL") as? Int ?? 180
         noDataAlarmEnabled = d.object(forKey: "NO_DATA_ALARM_ENABLED") as? Bool ?? true
         noDataAlarmMinutes = d.object(forKey: "NO_DATA_ALARM_MINUTES") as? Int ?? 15
+        timezoneAutomatic = d.object(forKey: "TIMEZONE_AUTOMATIC") as? Bool ?? true
+        timezoneOffsetMinutes = d.object(forKey: "TIMEZONE_OFFSET_MINUTES") as? Int ?? Self.currentTimezoneOffsetMinutes
         notificationsEnabled = d.object(forKey: "NOTIFICATIONS_ENABLED") as? Bool ?? false
         healthKitEnabled = d.object(forKey: "HEALTHKIT_ENABLED") as? Bool ?? false
         deviceConfigured = d.bool(forKey: "DEVICE_CONFIGURED")
@@ -73,5 +81,9 @@ final class AppSettings {
             d.object(forKey: "ALERT_LOW_MGDL") as? Int ?? 70,
             d.object(forKey: "ALERT_HIGH_MGDL") as? Int ?? 180
         )
+    }
+
+    static var currentTimezoneOffsetMinutes: Int {
+        TimeZone.current.secondsFromGMT() / 60
     }
 }

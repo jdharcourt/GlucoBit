@@ -325,7 +325,9 @@ default_settings = {
     "ALERT_LOW_MGDL": 70,
     "ALERT_HIGH_MGDL": 180,
     "NO_DATA_ALARM_ENABLED": True,
-    "NO_DATA_ALARM_MINUTES": 15
+    "NO_DATA_ALARM_MINUTES": 15,
+    "TIMEZONE_AUTOMATIC": True,
+    "TIMEZONE_OFFSET_MINUTES": 0
 }
 
 
@@ -372,6 +374,12 @@ def normalize_alert_settings(config):
     except Exception:
         minutes = 15
     config["NO_DATA_ALARM_MINUTES"] = max(5, min(minutes, 60))
+    config["TIMEZONE_AUTOMATIC"] = bool(config.get("TIMEZONE_AUTOMATIC", True))
+    try:
+        offset = int(config.get("TIMEZONE_OFFSET_MINUTES", 0))
+    except Exception:
+        offset = 0
+    config["TIMEZONE_OFFSET_MINUTES"] = max(-720, min(offset, 840))
 
 
 boot_msg = label.Label(
@@ -418,6 +426,8 @@ ALERT_LOW_MGDL = settings["ALERT_LOW_MGDL"]
 ALERT_HIGH_MGDL = settings["ALERT_HIGH_MGDL"]
 NO_DATA_ALARM_ENABLED = settings["NO_DATA_ALARM_ENABLED"]
 NO_DATA_ALARM_MINUTES = settings["NO_DATA_ALARM_MINUTES"]
+TIMEZONE_AUTOMATIC = settings["TIMEZONE_AUTOMATIC"]
+TIMEZONE_OFFSET_MINUTES = settings["TIMEZONE_OFFSET_MINUTES"]
 try:
     UI_THEME = int(settings.get("UI_THEME", 1))
 except Exception:
@@ -441,11 +451,12 @@ def apply_new_settings(updates):
     /save handler and the BLE settings characteristic.
 
     Returns (ok, wifi_changed)."""
-    global settings, UI_THEME
+    global settings, UI_THEME, ntp_synced, last_ntp_attempt
     global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
 
     old_ssid = settings.get("WIFI_SSID")
     old_password = settings.get("WIFI_PASSWORD")
+    old_timezone_offset = settings.get("TIMEZONE_OFFSET_MINUTES")
 
     settings.update(updates)
     normalize_alert_settings(settings)
@@ -468,6 +479,9 @@ def apply_new_settings(updates):
     wifi_changed = (settings.get("WIFI_SSID") != old_ssid or
                     settings.get("WIFI_PASSWORD") != old_password)
     pending_wifi_reconnect = wifi_changed
+    if settings.get("TIMEZONE_OFFSET_MINUTES") != old_timezone_offset:
+        ntp_synced = False
+        last_ntp_attempt = 0
     pending_session_refresh = True
     pending_display_refresh = True
     return True, wifi_changed
@@ -552,7 +566,7 @@ def sync_ntp(force=False):
     last_ntp_attempt = now
     try:
         ntp = adafruit_ntp.NTP(pool, server="pool.ntp.org", tz_offset=0)
-        rtc.RTC().datetime = ntp.datetime
+        rtc.RTC().datetime = time.localtime(time.mktime(ntp.datetime) + (TIMEZONE_OFFSET_MINUTES * 60))
         ntp_synced = True
         print("RTC synced to NTP")
         print(time.localtime())
@@ -568,7 +582,7 @@ def sync_clock_from_epoch(epoch, source):
     if ntp_synced or epoch is None or epoch < 1700000000:
         return False
     try:
-        rtc.RTC().datetime = time.localtime(epoch)
+        rtc.RTC().datetime = time.localtime(epoch + (TIMEZONE_OFFSET_MINUTES * 60))
         ntp_synced = True
         print(f"RTC synced from {source}")
         print(time.localtime())
@@ -1687,6 +1701,21 @@ def start_webserver(pool, https_session, ap_mode=False):
                         </div>
 
                         <div class="section">
+                            <div class="section-title">Clock Settings</div>
+                            <div class="toggle-group">
+                                <span class="toggle-label">Automatic timezone</span>
+                                <label class="toggle">
+                                    <input type="checkbox" id="TIMEZONE_AUTOMATIC" name="TIMEZONE_AUTOMATIC" {"checked" if TIMEZONE_AUTOMATIC else ""}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label for="TIMEZONE_OFFSET_MINUTES">Timezone Offset (minutes from UTC)</label>
+                                <input type="number" id="TIMEZONE_OFFSET_MINUTES" name="TIMEZONE_OFFSET_MINUTES" min="-720" max="840" step="15" value="{TIMEZONE_OFFSET_MINUTES}">
+                            </div>
+                        </div>
+
+                        <div class="section">
                             <div class="section-title">Alert Settings</div>
                             <div class="form-group">
                                 <label for="ALERT_LOW_MGDL">Low Alert (mg/dL)</label>
@@ -1819,6 +1848,18 @@ def start_webserver(pool, https_session, ap_mode=False):
                     }}
                 }}
 
+                const timezoneAutomatic = document.getElementById('TIMEZONE_AUTOMATIC');
+                const timezoneOffset = document.getElementById('TIMEZONE_OFFSET_MINUTES');
+                function updateBrowserTimezone() {{
+                    if (timezoneAutomatic && timezoneAutomatic.checked && timezoneOffset) {{
+                        timezoneOffset.value = String(-new Date().getTimezoneOffset());
+                    }}
+                }}
+                if (timezoneAutomatic) {{
+                    timezoneAutomatic.addEventListener('change', updateBrowserTimezone);
+                    updateBrowserTimezone();
+                }}
+
                 function signalBars(rssi) {{
                     if (rssi >= -50) return '▂▄▆█';
                     if (rssi >= -60) return '▂▄▆·';
@@ -1837,7 +1878,7 @@ def start_webserver(pool, https_session, ap_mode=False):
     # ============================================================
     @server.route("/save", methods=["POST"])
     def save(request: Request):
-        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST, ALERT_LOW_MGDL, ALERT_HIGH_MGDL, NO_DATA_ALARM_ENABLED, NO_DATA_ALARM_MINUTES
+        global settings, WIFI_SSID, WIFI_PASSWORD, DEXCOM_USERNAME, DEXCOM_PASSWORD, DEXCOM_SERVER, DISPLAY_NAME, MMOL, UI_THEME, BACKGROUND_COLOR, FORCE_ALARM_TEST, ALERT_LOW_MGDL, ALERT_HIGH_MGDL, NO_DATA_ALARM_ENABLED, NO_DATA_ALARM_MINUTES, TIMEZONE_AUTOMATIC, TIMEZONE_OFFSET_MINUTES
         global pending_wifi_reconnect, pending_session_refresh, pending_display_refresh
 
         form_data = request.form_data
@@ -1863,6 +1904,8 @@ def start_webserver(pool, https_session, ap_mode=False):
             "ALERT_HIGH_MGDL": form_data.get("ALERT_HIGH_MGDL", ALERT_HIGH_MGDL),
             "NO_DATA_ALARM_ENABLED": "NO_DATA_ALARM_ENABLED" in form_data,
             "NO_DATA_ALARM_MINUTES": form_data.get("NO_DATA_ALARM_MINUTES", NO_DATA_ALARM_MINUTES),
+            "TIMEZONE_AUTOMATIC": "TIMEZONE_AUTOMATIC" in form_data,
+            "TIMEZONE_OFFSET_MINUTES": form_data.get("TIMEZONE_OFFSET_MINUTES", TIMEZONE_OFFSET_MINUTES),
             "SETUP_MODE": False
         }
         

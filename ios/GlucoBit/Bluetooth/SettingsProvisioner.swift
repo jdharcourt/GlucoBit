@@ -18,6 +18,8 @@ struct SettingsProvisioner {
         case alertHighMgdl = "ALERT_HIGH_MGDL"
         case noDataAlarmEnabled = "NO_DATA_ALARM_ENABLED"
         case noDataAlarmMinutes = "NO_DATA_ALARM_MINUTES"
+        case timezoneAutomatic = "TIMEZONE_AUTOMATIC"
+        case timezoneOffsetMinutes = "TIMEZONE_OFFSET_MINUTES"
         case setupMode = "SETUP_MODE"
     }
 
