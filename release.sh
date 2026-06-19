@@ -6,6 +6,7 @@
 #   ./release.sh minor    → bump minor  (1.1.3 → 1.2.0)
 #   ./release.sh major    → bump major  (1.1.3 → 2.0.0)
 #   ./release.sh 1.2.5    → exact version
+# Then enter changelog lines at the prompt. Submit a blank line to finish.
 # ─────────────────────────────────────────────
 set -euo pipefail
 
@@ -37,6 +38,7 @@ echo "✅  Updated app/version.txt"
 # ── 3. Stage files in a temp dir ─────────────
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+NOTES="$TMP/release-notes.md"
 
 cp "$DEVICE/app/main.py"      "$TMP/main.py"
 cp "$DEVICE/app/ble.py"       "$TMP/ble.py"
@@ -57,12 +59,24 @@ cat > "$TMP/release.json" <<JSON
 JSON
 echo "✅  Built release.json"
 
-# ── 5. Publish to GitHub ──────────────────────
+# ── 5. Collect release notes ───────────────────
+echo ""
+echo "Enter changelog lines for v$NEW_VERSION. Blank line finishes."
+: > "$NOTES"
+while IFS= read -r line; do
+  [ -z "$line" ] && break
+  printf '%s\n' "$line" >> "$NOTES"
+done
+if [ ! -s "$NOTES" ]; then
+  printf 'OTA release v%s\n' "$NEW_VERSION" > "$NOTES"
+fi
+
+# ── 6. Publish to GitHub ──────────────────────
 echo "🚀  Creating GitHub release v$NEW_VERSION ..."
 gh release create "v$NEW_VERSION" \
   --repo "$REPO" \
   --title "v$NEW_VERSION" \
-  --notes "OTA release v$NEW_VERSION" \
+  --notes-file "$NOTES" \
   "$TMP/release.json" \
   "$TMP/main.py" \
   "$TMP/ble.py" \
