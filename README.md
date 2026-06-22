@@ -6,6 +6,7 @@ A CircuitPython glucose monitoring display that fetches readings from the Dexcom
 
 
 ##About
+
 GlucoBit is a standalone glucose visualisation and alert device. The product aims to solve some of the daily issues faced by Type 1 Diabetics. At present, CGMs (Continuous Glucose Monitors) send glucose data to a smartphone, where the user can access their current levels and receive alerts for low and high blood sugar events, however, missed hypoglycemic alarms, alarm fatigue, and an over-reliance on smartphones for blood glucose monitoring can cause huge issues for people with type 1 Diabetes.
 
 One of the biggest issues faced with traditional phone-based glucose monitoring is the over-reliance on smartphones. GlucoBit solves this problem by providing a standalone, fully battery-powered device that can travel with you, displaying current glucose levels on an Always-on-display, along with glucose range indicating LEDs. The versatility of GlucoBit allows it to be used anywhere, whether that be on a bedside table, a desk at school or work, or even in an exam situation where phones for glucose monitoring and alerts are not allowed.
